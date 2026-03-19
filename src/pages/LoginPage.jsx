@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase';
 
 export default function LoginPage() {
   const loginWithGoogle = async () => {
-    const redirectTo = window.location.origin;
+    const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).href;
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
