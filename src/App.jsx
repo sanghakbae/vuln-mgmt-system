@@ -74,6 +74,19 @@ export default function App() {
   const sessionTimerRef = useRef(null);
   const lastActivityAtRef = useRef(0);
 
+  if (!supabase) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6 text-center">
+        <div className="rounded-xl border border-rose-200 bg-white p-8 shadow-sm">
+          <div className="text-lg font-semibold text-slate-900">Supabase 설정 누락</div>
+          <div className="mt-2 text-sm text-slate-500">
+            `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`가 배포 환경에 설정되어야 합니다.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function applyWorkflowConfirmationState(nextState) {
     const normalized = {
       assets: Boolean(nextState.assets),
