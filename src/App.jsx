@@ -26,6 +26,7 @@ const ACTIVITY_EVENTS = [
   'click',
 ];
 const ACTIVITY_THROTTLE_MS = 5000;
+const ASSETS_CACHE_KEY = 'assets-page-cache';
 const WORKFLOW_CONFIRMATION_TABLE = 'workflow_confirmations';
 const WORKFLOW_CONFIRMATION_TARGET_TYPE = 'workflow_confirmation';
 const WORKFLOW_CONFIRMATION_STEPS = [
@@ -73,6 +74,45 @@ export default function App() {
 
   const sessionTimerRef = useRef(null);
   const lastActivityAtRef = useRef(0);
+
+  async function warmAssetsCache() {
+    try {
+      const attempts = [
+        () => supabase.from('assets').select('*').order('updated_at', { ascending: false }),
+        () => supabase.from('assets').select('*').order('asset_code', { ascending: true }),
+        () => supabase.from('assets').select('*'),
+      ];
+
+      let lastError = null;
+
+      for (const run of attempts) {
+        const { data, error } = await run();
+        if (error) {
+          lastError = error;
+          continue;
+        }
+
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(
+            ASSETS_CACHE_KEY,
+            JSON.stringify({
+              rows: data || [],
+              rawCount: data?.length || 0,
+              updatedAt: Date.now(),
+            })
+          );
+        }
+
+        return;
+      }
+
+      if (lastError) {
+        console.error('assets cache warmup 실패:', lastError);
+      }
+    } catch (err) {
+      console.error('assets cache warmup 예외:', err);
+    }
+  }
 
   if (!supabase) {
     return (
@@ -226,6 +266,9 @@ export default function App() {
           });
 
           await validateAndSyncUser(currentSession);
+          warmAssetsCache().catch((err) => {
+            console.error('assets cache warmup 실패:', err);
+          });
         } else {
           setCurrentUser(null);
         }
@@ -262,6 +305,9 @@ export default function App() {
         });
 
         await validateAndSyncUser(newSession);
+        warmAssetsCache().catch((err) => {
+          console.error('assets cache warmup 실패:', err);
+        });
       } else {
         setCurrentUser(null);
         clearSessionTimer();

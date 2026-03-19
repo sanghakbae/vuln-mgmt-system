@@ -6,6 +6,7 @@ import { exportAssetsWorkbook, parseAssetsWorkbook } from '../utils/assetsWorkbo
 import { chunkArray, runSupabaseMutation } from '../utils/supabaseMutation';
 
 const PAGE_SIZE = 25;
+const ASSETS_CACHE_KEY = 'assets-page-cache';
 
 const TYPE_OPTIONS = [
   { label: '전체', value: 'ALL' },
@@ -122,6 +123,49 @@ function calcCriticality(confidentiality, integrity, availability) {
   if (score >= 8) grade = '상';
   else if (score >= 5) grade = '중';
   return { score, grade };
+}
+
+function readAssetsCache() {
+  if (typeof window === 'undefined') {
+    return { rows: [], rawCount: null };
+  }
+
+  try {
+    const cached = window.localStorage.getItem(ASSETS_CACHE_KEY);
+    if (!cached) return { rows: [], rawCount: null };
+
+    const parsed = JSON.parse(cached);
+    if (!Array.isArray(parsed?.rows)) {
+      return { rows: [], rawCount: null };
+    }
+
+    const normalizedRows = parsed.rows.map(normalizeAssetRow);
+
+    return {
+      rows: normalizedRows,
+      rawCount: Number(parsed.rawCount ?? normalizedRows.length),
+    };
+  } catch (cacheError) {
+    console.error(cacheError);
+    return { rows: [], rawCount: null };
+  }
+}
+
+function writeAssetsCache(rows, rawCount) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(
+      ASSETS_CACHE_KEY,
+      JSON.stringify({
+        rows,
+        rawCount,
+        updatedAt: Date.now(),
+      })
+    );
+  } catch (cacheError) {
+    console.error(cacheError);
+  }
 }
 
 function Card({ children, className = '' }) {
@@ -388,8 +432,8 @@ export default function AssetsPage({
   onConfirmAssets,
   onCancelAssetConfirmation,
 }) {
-  const [assetRows, setAssetRows] = useState([]);
-  const [rawAssetCount, setRawAssetCount] = useState(null);
+  const [assetRows, setAssetRows] = useState(() => readAssetsCache().rows);
+  const [rawAssetCount, setRawAssetCount] = useState(() => readAssetsCache().rawCount);
   const [debugInfo, setDebugInfo] = useState('');
   const [keyword, setKeyword] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
@@ -425,15 +469,25 @@ export default function AssetsPage({
     setConfirmError('');
   }, [assetsConfirmed]);
 
+  useEffect(() => {
+    if (assetRows.length > 0) {
+      setDebugInfo(`cache restored (${assetRows.length})`);
+    }
+  }, []);
+
   async function fetchAssets() {
     if (!supabase) {
       throw new Error('Supabase 설정이 없습니다. .env 파일을 확인하세요.');
     }
 
     const data = await selectAssetsWithFallback();
+    const normalizedRows = data.map(normalizeAssetRow);
+
     setRawAssetCount(data.length);
     setDebugInfo(`supabase-js ok (${data.length})`);
-    setAssetRows(data.map(normalizeAssetRow));
+    setAssetRows(normalizedRows);
+
+    writeAssetsCache(normalizedRows, data.length);
   }
 
   async function runAssetsDebugProbe() {
