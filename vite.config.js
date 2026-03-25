@@ -1,10 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// 배포 대상 판단
-const isGithub = process.env.VITE_DEPLOY_TARGET === "github";
+const repoName = process.env.GITHUB_REPOSITORY?.split("/")[1];
 
 export default defineConfig({
-   plugins: [react()],
-   base: isGithub ? "/vuln-mgmt-system/" : "/",
+  plugins: [react()],
+  base: process.env.GITHUB_ACTIONS ? `/${repoName}/` : "/",
 });
