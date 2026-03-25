@@ -1,21 +1,25 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from "../lib/supabase";
 
 export default function LoginPage() {
   const loginWithGoogle = async () => {
-    const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).href;
+    const isGithubPages = window.location.hostname === "sanghakbae.github.io";
+
+    const redirectTo = isGithubPages
+      ? `${window.location.origin}/vuln-mgmt-system/`
+      : window.location.origin;
 
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
+      provider: "google",
       options: {
         redirectTo,
         queryParams: {
-          prompt: 'select_account',
+          prompt: "select_account",
         },
       },
     });
 
     if (error) {
-      console.error('Google 로그인 실패:', error.message);
+      console.error("Google 로그인 실패:", error.message);
       alert(error.message);
     }
   };
@@ -29,9 +33,11 @@ export default function LoginPage() {
           <div className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold tracking-[0.18em] text-slate-500">
             VULNERABILITY MANAGEMENT
           </div>
+
           <h1 className="mt-4 text-xl font-semibold tracking-tight text-slate-900">
             취약점 관리 시스템
           </h1>
+
           <p className="mt-2 text-xs leading-5 text-slate-500">
             허용된 Google 계정으로 로그인하세요.
           </p>
@@ -39,7 +45,9 @@ export default function LoginPage() {
 
         <div className="space-y-4 px-6 py-6">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-[11px] font-medium text-slate-500">로그인 방식</div>
+            <div className="text-[11px] font-medium text-slate-500">
+              로그인 방식
+            </div>
             <div className="mt-1 text-xs text-slate-600">
               Google OAuth
               <span className="mx-1.5 text-slate-300">•</span>
