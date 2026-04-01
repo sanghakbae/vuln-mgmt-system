@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import { DEFAULT_ALLOWED_DOMAINS } from "../utils/securityDefaults";
 
 export default function LoginPage() {
   const loginWithGoogle = async () => {
@@ -51,7 +52,7 @@ export default function LoginPage() {
             <div className="mt-1 text-xs text-slate-600">
               Google OAuth
               <span className="mx-1.5 text-slate-300">•</span>
-              허용 도메인 `muhayu.com`, `gmail.com`
+              허용 도메인 `{DEFAULT_ALLOWED_DOMAINS.join('`, `')}`
             </div>
           </div>
 

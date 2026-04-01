@@ -27,7 +27,7 @@ const CONFIRM_WORD_POOL = [
 
 function Card({ children, className = '' }) {
   return (
-    <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>
+    <div className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}>
       {children}
     </div>
   );
@@ -35,8 +35,8 @@ function Card({ children, className = '' }) {
 
 function SectionHeader({ title, desc, action }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-3 xl:flex-row xl:items-center xl:justify-between">
-      <div>
+    <div className="flex min-h-[88px] flex-col gap-3 border-b border-slate-200 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex min-h-[56px] flex-col justify-center">
         <div className="text-lg font-semibold text-slate-900">{title}</div>
         <div className="mt-0.5 text-xs text-slate-500">{desc}</div>
       </div>
@@ -47,8 +47,9 @@ function SectionHeader({ title, desc, action }) {
 
 export default function TargetRegistrationPage({
   onNavigate,
-  unlockNextStep,
   inspectionConfirmed = false,
+  canEdit = true,
+  canConfirm = false,
   onConfirmInspectionTargets,
   onCancelInspectionConfirmation,
 }) {
@@ -71,6 +72,8 @@ export default function TargetRegistrationPage({
   const [confirmWord, setConfirmWord] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
   const [confirmError, setConfirmError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [cancelingConfirmation, setCancelingConfirmation] = useState(false);
 
   const selectedAssetIdSet = useMemo(
     () => new Set((targets || []).map((row) => row.asset_id)),
@@ -130,7 +133,7 @@ export default function TargetRegistrationPage({
       .from('assets')
       .select(
         'id, asset_code, asset_type, hostname, ip_address, location',
-        { count: 'exact' }
+        { count: 'planned' }
       )
       .order('asset_code', { ascending: true });
 
@@ -210,6 +213,11 @@ export default function TargetRegistrationPage({
   }, [currentPage, totalPages]);
 
   async function handleAddTarget(row) {
+    if (!canEdit) {
+      setError('현재 권한으로는 점검 대상을 수정할 수 없습니다.');
+      return;
+    }
+
     if (inspectionConfirmed) {
       setError('점검 대상이 확정되어 수정할 수 없습니다.');
       return;
@@ -267,6 +275,11 @@ export default function TargetRegistrationPage({
   }
 
   async function handleRemoveTarget(row) {
+    if (!canEdit) {
+      setError('현재 권한으로는 점검 대상을 수정할 수 없습니다.');
+      return;
+    }
+
     if (inspectionConfirmed) {
       setError('점검 대상이 확정되어 수정할 수 없습니다.');
       return;
@@ -315,7 +328,12 @@ export default function TargetRegistrationPage({
     }
   }
 
-  function handleConfirmTargets() {
+  async function handleConfirmTargets() {
+    if (!canConfirm) {
+      setConfirmError('현재 권한으로는 점검 대상을 확정할 수 없습니다.');
+      return;
+    }
+
     if (inspectionConfirmed) return;
 
     setMessage('');
@@ -332,23 +350,51 @@ export default function TargetRegistrationPage({
       return;
     }
 
-    onConfirmInspectionTargets?.();
-    unlockNextStep?.('inspection');
-    setMessage('점검 대상이 확정되었습니다. 점검 결과 등록이 활성화되었습니다.');
+    try {
+      setConfirming(true);
+      await onConfirmInspectionTargets?.();
+      setMessage('점검 대상이 확정되었습니다. 점검 결과 등록이 활성화되었습니다.');
+    } catch (err) {
+      console.error(err);
+      setConfirmError(err.message || '점검 대상 확정 실패');
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleCancelConfirmation() {
+    if (!canConfirm) {
+      setError('현재 권한으로는 점검 대상 확정을 취소할 수 없습니다.');
+      return;
+    }
+
+    try {
+      setCancelingConfirmation(true);
+      setMessage('');
+      setError('');
+      setConfirmError('');
+      await onCancelInspectionConfirmation?.();
+      setMessage('점검 대상 확정이 취소되었습니다.');
+    } catch (err) {
+      console.error(err);
+      setError(err.message || '점검 대상 확정 취소 실패');
+    } finally {
+      setCancelingConfirmation(false);
+    }
   }
 
   return (
     <div className="space-y-4">
-      <Card className={inspectionConfirmed ? 'border-emerald-300 bg-emerald-50/70' : ''}>
-        <div className="flex w-full flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <Card className={inspectionConfirmed ? 'border-emerald-300 bg-emerald-50/70' : 'border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700'}>
+        <div className="flex min-h-[72px] w-full flex-col gap-2 px-5 py-2.5 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+            <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${inspectionConfirmed ? 'text-slate-600' : 'text-slate-200'}`}>
               <span>점검 대상 검토가 끝났다면 확인키를 입력해 확정하세요.</span>
               {inspectionConfirmed ? (
                 <span className="text-xs font-semibold text-slate-900">확정 완료</span>
               ) : (
-                <span className="text-xs font-semibold text-slate-900">
-                  확인키: <span className="text-rose-600">{confirmWord || '-'}</span>
+                <span className="inline-flex items-center rounded-md bg-white/12 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-inset ring-white/10">
+                  확인키: <span className="ml-1 font-bold text-rose-400">{confirmWord || '-'}</span>
                 </span>
               )}
             </div>
@@ -360,11 +406,16 @@ export default function TargetRegistrationPage({
                 점검 대상 확정 완료
               </div>
               <button
-                onClick={onCancelInspectionConfirmation}
+                onClick={handleCancelConfirmation}
+                disabled={cancelingConfirmation || !canConfirm}
                 className="inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700"
               >
-                대상 확정 취소
+                {cancelingConfirmation ? '취소 중...' : '대상 확정 취소'}
               </button>
+            </div>
+          ) : !canConfirm ? (
+            <div className="inline-flex h-8 items-center rounded-lg border border-white/15 bg-white/10 px-3 text-xs font-medium text-slate-200">
+              확정 권한 없음
             </div>
           ) : (
             <div className="flex w-full flex-col gap-2 text-right lg:flex-1 lg:items-end">
@@ -372,14 +423,16 @@ export default function TargetRegistrationPage({
                 <input
                   value={confirmInput}
                   onChange={(e) => setConfirmInput(e.target.value)}
-                  className="h-8 w-full rounded-lg border border-slate-300 bg-white px-3 text-xs outline-none sm:max-w-[240px]"
+                  disabled={confirming || !canConfirm}
+                  className="h-8 w-full rounded-lg border border-white/15 bg-white/95 px-3 text-xs text-slate-900 outline-none sm:max-w-[240px]"
                   placeholder="확인키를 정확히 입력하세요"
                 />
                 <button
                   onClick={handleConfirmTargets}
-                  className="inline-flex h-8 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white sm:w-auto"
+                  disabled={confirming || !canConfirm}
+                  className="inline-flex h-8 items-center rounded-lg bg-white px-3 text-xs font-semibold text-slate-900 sm:w-auto"
                 >
-                  대상 확정
+                  {confirming ? '확정 중...' : '대상 확정'}
                 </button>
               </div>
               {confirmError ? <div className="text-xs text-rose-600">{confirmError}</div> : null}
@@ -389,7 +442,7 @@ export default function TargetRegistrationPage({
       </Card>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card className="w-full rounded-2xl p-4">
+        <Card className="flex min-h-[112px] w-full flex-col justify-between rounded-2xl p-4">
           <div className="text-[11px] font-semibold text-slate-500">전체 자산</div>
           <div className="mt-2 text-[28px] font-bold tracking-tight text-slate-900">
             {totalAssetCount}
@@ -399,7 +452,7 @@ export default function TargetRegistrationPage({
           </div>
         </Card>
 
-        <Card className="w-full rounded-2xl p-4">
+        <Card className="flex min-h-[112px] w-full flex-col justify-between rounded-2xl p-4">
           <div className="text-[11px] font-semibold text-slate-500">점검 대상</div>
           <div className="mt-2 text-[28px] font-bold tracking-tight text-slate-900">
             {visibleTargetCount}
@@ -409,7 +462,7 @@ export default function TargetRegistrationPage({
           </div>
         </Card>
 
-        <Card className="w-full rounded-2xl p-4">
+        <Card className="flex min-h-[112px] w-full flex-col justify-between rounded-2xl p-4">
           <div className="text-[11px] font-semibold text-slate-500">미선정 자산</div>
           <div className="mt-2 text-[28px] font-bold tracking-tight text-slate-900">
             {visibleUnselectedCount}
@@ -548,7 +601,7 @@ export default function TargetRegistrationPage({
                           <td className="px-2 py-1 text-center whitespace-nowrap">
                             <button
                               onClick={() => handleAddTarget(row)}
-                              disabled={inspectionConfirmed || alreadySelected || savingAssetId === row.id}
+                              disabled={!canEdit || inspectionConfirmed || alreadySelected || savingAssetId === row.id}
                               className={`inline-flex min-w-[56px] items-center justify-center rounded-full px-2.5 py-1 text-xs font-semibold transition ${
                                 inspectionConfirmed || alreadySelected
                                   ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
@@ -656,7 +709,7 @@ export default function TargetRegistrationPage({
                         <td className="px-2 py-1 text-center whitespace-nowrap">
                           <button
                             onClick={() => handleRemoveTarget(row)}
-                            disabled={inspectionConfirmed || removingTargetId === row.id}
+                            disabled={!canEdit || inspectionConfirmed || removingTargetId === row.id}
                             className="inline-flex min-w-[56px] items-center justify-center rounded-full border border-rose-200 px-2.5 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
                           >
                             {removingTargetId === row.id ? '처리중' : '제거'}

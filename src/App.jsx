@@ -1,7 +1,20 @@
-import { NAV_META, ADMIN_ONLY_MENUS } from './constants/navigation';
+import { NAV_META } from './constants/navigation';
+import React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { runSupabaseMutation } from './utils/supabaseMutation';
+import { buildErrorDetails } from './utils/errorDialog';
+import { ASSET_SELECT_COLUMNS } from './services/assetsService';
+import {
+  canAccessMenu,
+  canConfirmWorkflow,
+  canDeleteReports,
+  canEditWorkflowData,
+  canGenerateReports,
+  normalizeEmail,
+  parseAllowedDomains,
+  resolveUserRole,
+} from './utils/securityDefaults';
 import LoginPage from './pages/LoginPage';
 
 import AppLayout from './layout/AppLayout';
@@ -16,7 +29,6 @@ import SecurityPage from './pages/SecurityPage';
 import AuditPage from './pages/AuditPage';
 import AccessControlPage from './pages/AccessControlPage';
 
-const ADMIN_EMAIL_FALLBACKS = ['shbae@muhayu.com'];
 const ACTIVITY_EVENTS = [
   'mousemove',
   'mousedown',
@@ -36,6 +48,9 @@ const WORKFLOW_CONFIRMATION_STEPS = [
   'inspectionResult',
   'vuln',
 ];
+const WORKFLOW_REQUEST_TIMEOUT_MS = 10000;
+const USER_ROLE_CACHE_KEY = 'user-role-cache';
+const WORKFLOW_CACHE_KEY = 'workflow-confirmation-cache';
 
 function NoPermission() {
   return (
@@ -48,9 +63,149 @@ function NoPermission() {
   );
 }
 
+function withTimeout(task, timeoutMs, label) {
+  return Promise.race([
+    task,
+    new Promise((_, reject) => {
+      window.setTimeout(() => {
+        reject(new Error(`${label} 처리 시간이 ${timeoutMs / 1000}초를 초과했습니다.`));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
+function readCachedUserRole(email) {
+  if (typeof window === 'undefined') return '';
+
+  try {
+    const raw = window.sessionStorage.getItem(USER_ROLE_CACHE_KEY);
+    if (!raw) return '';
+
+    const parsed = JSON.parse(raw);
+    return parsed?.[normalizeEmail(email)] || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeCachedUserRole(email, role) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const raw = window.sessionStorage.getItem(USER_ROLE_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[normalizeEmail(email)] = role;
+    window.sessionStorage.setItem(USER_ROLE_CACHE_KEY, JSON.stringify(parsed));
+  } catch {
+    // cache miss should not block auth flow
+  }
+}
+
+function readCachedWorkflowState() {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(WORKFLOW_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedWorkflowState(state) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.sessionStorage.setItem(WORKFLOW_CACHE_KEY, JSON.stringify(state));
+  } catch {
+    // cache write failure should not block rendering
+  }
+}
+
+function ErrorDialog({ detail, onClose }) {
+  if (!detail) return null;
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/60 px-4">
+      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="text-lg font-semibold text-slate-900">{detail.title}</div>
+            <div className="mt-1 text-xs text-slate-500">{detail.summary}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700"
+          >
+            닫기
+          </button>
+        </div>
+
+        <div className="space-y-3 px-5 py-4">
+          <div className="text-xs font-medium text-slate-500">상세 오류 정보</div>
+          <textarea
+            readOnly
+            value={detail.detailsText}
+            rows={18}
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-[12px] leading-5 text-slate-800 outline-none"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { errorDetail: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      errorDetail: buildErrorDetails(error, {
+        title: '화면 렌더링 오류',
+        context: 'AppErrorBoundary',
+      }),
+    };
+  }
+
+  componentDidCatch(error) {
+    console.error('render error', error);
+  }
+
+  render() {
+    if (this.state.errorDetail) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
+          <div className="w-full max-w-3xl rounded-2xl border border-rose-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <div className="text-lg font-semibold text-slate-900">화면 렌더링 오류</div>
+              <div className="mt-1 text-xs text-slate-500">
+                아래 상세 정보를 확인하세요.
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <textarea
+                readOnly
+                value={this.state.errorDetail.detailsText}
+                rows={18}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-[12px] leading-5 text-slate-800 outline-none"
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [workflowLoading, setWorkflowLoading] = useState(false);
   const [activeMenu, setActiveMenu] = useState('dashboard');
   const [currentUser, setCurrentUser] = useState(null);
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(60);
@@ -59,28 +214,74 @@ export default function App() {
   const [inspectionConfirmed, setInspectionConfirmed] = useState(false);
   const [inspectionResultConfirmed, setInspectionResultConfirmed] = useState(false);
   const [vulnerabilityConfirmed, setVulnerabilityConfirmed] = useState(false);
-  const [menuEnabledMap, setMenuEnabledMap] = useState({
-    dashboard: true,
-    assets: true,
-    inspection: false,
-    checklist: false,
-    inspectionResult: false,
-    vuln: false,
-    report: false,
-    security: true,
-    access: true,
-    audit: true,
+  const [errorDialog, setErrorDialog] = useState(null);
+  const [menuEnabledMap, setMenuEnabledMap] = useState(() => {
+    const cached = readCachedWorkflowState();
+    const normalized = {
+      assets: cached?.assets === true,
+      checklist: cached?.checklist === true,
+      inspection: cached?.inspection === true,
+      inspectionResult: cached?.inspectionResult === true,
+      vuln: cached?.vuln === true,
+    };
+
+    return {
+      dashboard: true,
+      assets: true,
+      checklist: normalized.assets,
+      inspection: normalized.checklist,
+      inspectionResult: normalized.inspection,
+      vuln: normalized.inspectionResult,
+      report: normalized.vuln,
+      security: true,
+      access: true,
+      audit: true,
+    };
   });
 
   const sessionTimerRef = useRef(null);
   const lastActivityAtRef = useRef(0);
 
+  useEffect(() => {
+    function handleAppError(event) {
+      setErrorDialog(event.detail || null);
+    }
+
+    function handleWindowError(event) {
+      setErrorDialog(
+        buildErrorDetails(event.error || event.message || '런타임 오류', {
+          title: '런타임 오류',
+          context: 'window.error',
+        })
+      );
+    }
+
+    function handleUnhandledRejection(event) {
+      setErrorDialog(
+        buildErrorDetails(event.reason || '처리되지 않은 비동기 오류', {
+          title: '처리되지 않은 비동기 오류',
+          context: 'window.unhandledrejection',
+        })
+      );
+    }
+
+    window.addEventListener('app:error', handleAppError);
+    window.addEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('app:error', handleAppError);
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
   async function warmAssetsCache() {
     try {
       const attempts = [
-        () => supabase.from('assets').select('*').order('updated_at', { ascending: false }),
-        () => supabase.from('assets').select('*').order('asset_code', { ascending: true }),
-        () => supabase.from('assets').select('*'),
+        () => supabase.from('assets').select(ASSET_SELECT_COLUMNS).order('updated_at', { ascending: false }),
+        () => supabase.from('assets').select(ASSET_SELECT_COLUMNS).order('asset_code', { ascending: true }),
+        () => supabase.from('assets').select(ASSET_SELECT_COLUMNS),
       ];
 
       let lastError = null;
@@ -136,6 +337,8 @@ export default function App() {
       vuln: Boolean(nextState.vuln),
     };
 
+    writeCachedWorkflowState(normalized);
+
     setAssetsConfirmed(normalized.assets);
     setChecklistConfirmed(normalized.checklist);
     setInspectionConfirmed(normalized.inspection);
@@ -162,11 +365,17 @@ export default function App() {
   }
 
   async function loadWorkflowConfirmations() {
+    setWorkflowLoading(true);
+
     try {
-      const { data, error } = await supabase
-        .from(WORKFLOW_CONFIRMATION_TABLE)
-        .select('step_key,is_confirmed')
-        .in('step_key', WORKFLOW_CONFIRMATION_STEPS);
+      const { data, error } = await withTimeout(
+        supabase
+          .from(WORKFLOW_CONFIRMATION_TABLE)
+          .select('step_key,is_confirmed')
+          .in('step_key', WORKFLOW_CONFIRMATION_STEPS),
+        WORKFLOW_REQUEST_TIMEOUT_MS,
+        '워크플로 상태 조회'
+      );
 
       if (error) throw error;
       const rowMap = Object.fromEntries((data || []).map((row) => [row.step_key, row]));
@@ -180,6 +389,12 @@ export default function App() {
       });
     } catch (err) {
       console.error('workflow confirmation 로드 실패:', err);
+      setErrorDialog(
+        buildErrorDetails(err, {
+          title: '워크플로 상태 조회 실패',
+          context: 'App.loadWorkflowConfirmations',
+        })
+      );
       applyWorkflowConfirmationState({
         assets: false,
         checklist: false,
@@ -187,6 +402,8 @@ export default function App() {
         inspectionResult: false,
         vuln: false,
       });
+    } finally {
+      setWorkflowLoading(false);
     }
   }
 
@@ -210,27 +427,35 @@ export default function App() {
       };
     });
 
-    await runSupabaseMutation(async () => {
-      const { error } = await supabase
-        .from(WORKFLOW_CONFIRMATION_TABLE)
-        .upsert(rows, { onConflict: 'step_key' });
+    await withTimeout(
+      runSupabaseMutation(async () => {
+        const { error } = await supabase
+          .from(WORKFLOW_CONFIRMATION_TABLE)
+          .upsert(rows, { onConflict: 'step_key' });
 
-      if (error) throw error;
-    });
+        if (error) throw error;
+      }),
+      WORKFLOW_REQUEST_TIMEOUT_MS,
+      '워크플로 확정 저장'
+    );
 
-    await Promise.all(
-      Object.entries(changes).map(([step, confirmed]) =>
-        insertSecurityAuditLog(
-          confirmed ? 'confirm' : 'cancel',
-          {
-            step,
-            confirmed: Boolean(confirmed),
-          },
-          effectiveEmail,
-          actorId,
-          WORKFLOW_CONFIRMATION_TARGET_TYPE
+    await withTimeout(
+      Promise.all(
+        Object.entries(changes).map(([step, confirmed]) =>
+          insertSecurityAuditLog(
+            confirmed ? 'confirm' : 'cancel',
+            {
+              step,
+              confirmed: Boolean(confirmed),
+            },
+            effectiveEmail,
+            actorId,
+            WORKFLOW_CONFIRMATION_TARGET_TYPE
+          )
         )
-      )
+      ),
+      WORKFLOW_REQUEST_TIMEOUT_MS,
+      '감사 로그 저장'
     );
   }
 
@@ -249,12 +474,10 @@ export default function App() {
 
         const currentSession = data?.session ?? null;
         setSession(currentSession);
-        setAuthLoading(false);
 
         if (currentSession?.user?.email) {
           const email = currentSession.user.email;
-          const fallbackRole = ADMIN_EMAIL_FALLBACKS.includes(email) ? 'admin' : 'user';
-
+          const cachedRole = readCachedUserRole(email);
           setCurrentUser({
             id: currentSession.user.id,
             email,
@@ -262,7 +485,7 @@ export default function App() {
               currentSession.user.user_metadata?.name ||
               currentSession.user.user_metadata?.full_name ||
               '',
-            role: fallbackRole,
+            role: resolveUserRole(cachedRole, email),
           });
 
           await validateAndSyncUser(currentSession);
@@ -272,6 +495,7 @@ export default function App() {
         } else {
           setCurrentUser(null);
         }
+        setAuthLoading(false);
       } catch (err) {
         console.error('앱 초기화 실패:', err);
         if (mounted) {
@@ -292,8 +516,7 @@ export default function App() {
 
       if (newSession?.user?.email) {
         const email = newSession.user.email;
-        const fallbackRole = ADMIN_EMAIL_FALLBACKS.includes(email) ? 'admin' : 'user';
-
+        const cachedRole = readCachedUserRole(email);
         setCurrentUser({
           id: newSession.user.id,
           email,
@@ -301,7 +524,7 @@ export default function App() {
             newSession.user.user_metadata?.name ||
             newSession.user.user_metadata?.full_name ||
             '',
-          role: fallbackRole,
+          role: resolveUserRole(cachedRole, email),
         });
 
         await validateAndSyncUser(newSession);
@@ -387,7 +610,7 @@ export default function App() {
     try {
       const { data: securityRows, error } = await supabase
         .from('security_settings')
-        .select('*')
+        .select('google_oauth_enabled,allowed_domains,session_timeout_minutes')
         .order('id', { ascending: true })
         .limit(1);
 
@@ -443,18 +666,14 @@ export default function App() {
     try {
       const email = currentSession?.user?.email || '';
       const domain = email.split('@')[1]?.toLowerCase() || '';
+      const defaultRole = resolveUserRole('', email);
 
       if (!email) return;
 
       const securitySettings = await loadSecuritySettings();
       const googleOAuthEnabled = securitySettings?.google_oauth_enabled ?? true;
 
-      const allowedDomains = String(
-        securitySettings?.allowed_domains || 'muhayu.com'
-      )
-        .split(',')
-        .map((v) => v.trim().toLowerCase())
-        .filter(Boolean);
+      const allowedDomains = parseAllowedDomains(securitySettings?.allowed_domains);
 
       const timeoutMinutes = Number(securitySettings?.session_timeout_minutes || 60);
       setSessionTimeoutMinutes(timeoutMinutes);
@@ -476,23 +695,44 @@ export default function App() {
         last_login: new Date().toISOString(),
       };
 
-      const upsertTry1 = await runSupabaseMutation(async () => {
-        return await supabase.from('users').upsert(
-          {
+      const existingUser = await supabase
+        .from('users')
+        .select('id,role')
+        .eq('id', currentSession.user.id)
+        .maybeSingle();
+
+      if (existingUser.error) {
+        console.error('users 조회 실패(기존 사용자 확인):', existingUser.error.message);
+      }
+
+      const upsertPayload = existingUser.data
+        ? {
             ...basePayload,
             updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' }
-        );
+          }
+        : {
+            ...basePayload,
+            role: defaultRole,
+            updated_at: new Date().toISOString(),
+          };
+
+      const upsertTry1 = await runSupabaseMutation(async () => {
+        return await supabase.from('users').upsert(upsertPayload, { onConflict: 'id' });
       });
 
       if (upsertTry1.error) {
         console.warn('users upsert(updated_at 포함) 실패:', upsertTry1.error.message);
 
         const upsertTry2 = await runSupabaseMutation(async () => {
-          return await supabase
-            .from('users')
-            .upsert(basePayload, { onConflict: 'id' });
+          return await supabase.from('users').upsert(
+            existingUser.data
+              ? basePayload
+              : {
+                  ...basePayload,
+                  role: defaultRole,
+                },
+            { onConflict: 'id' }
+          );
         });
 
         if (upsertTry2.error) {
@@ -502,7 +742,7 @@ export default function App() {
 
       const byId = await supabase
         .from('users')
-        .select('*')
+        .select('id,email,name,role')
         .eq('id', currentSession.user.id)
         .maybeSingle();
 
@@ -513,30 +753,33 @@ export default function App() {
       const dbUser = byId.data;
 
       if (dbUser) {
+        const resolvedRole = resolveUserRole(dbUser.role, dbUser.email);
+
+        if (!dbUser.role) {
+          const { error: roleUpdateError } = await supabase
+            .from('users')
+            .update({
+              role: resolvedRole,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', dbUser.id);
+
+          if (roleUpdateError) {
+            console.warn('users role 기본값 저장 실패:', roleUpdateError.message);
+          } else {
+            dbUser.role = resolvedRole;
+          }
+        }
+
+        writeCachedUserRole(dbUser.email, resolvedRole);
         setCurrentUser({
           ...dbUser,
-          role:
-            dbUser.role ||
-            (ADMIN_EMAIL_FALLBACKS.includes(dbUser.email) ? 'admin' : 'user'),
+          role: resolvedRole,
         });
       }
     } catch (err) {
       console.error('validateAndSyncUser 실패:', err);
     }
-  }
-
-  function unlockNextStep(current) {
-    setMenuEnabledMap((prev) => {
-      const next = { ...prev };
-
-      if (current === 'assets') next.checklist = true;
-      if (current === 'checklist') next.inspection = true;
-      if (current === 'inspection') next.inspectionResult = true;
-      if (current === 'inspectionResult') next.vuln = true;
-      if (current === 'vuln') next.report = true;
-
-      return next;
-    });
   }
 
   const handleLogout = async () => {
@@ -552,11 +795,23 @@ export default function App() {
   };
 
   const effectiveEmail = currentUser?.email || session?.user?.email || '';
-  const isAdmin =
-    currentUser?.role === 'admin' || ADMIN_EMAIL_FALLBACKS.includes(effectiveEmail);
+  const effectiveRole = resolveUserRole(currentUser?.role, effectiveEmail);
+  const isAdmin = effectiveRole === 'admin';
+  const canEditData = canEditWorkflowData(effectiveEmail, effectiveRole);
+  const canConfirmData = canConfirmWorkflow(effectiveEmail, effectiveRole);
+  const canGenerateReport = canGenerateReports(effectiveEmail, effectiveRole);
+  const canDeleteReport = canDeleteReports(effectiveEmail, effectiveRole);
+  const effectiveMenuEnabledMap = useMemo(
+    () =>
+      isAdmin
+        ? Object.keys(menuEnabledMap).reduce((acc, key) => ({ ...acc, [key]: true }), {})
+        : menuEnabledMap,
+    [isAdmin, menuEnabledMap]
+  );
 
   useEffect(() => {
     if (!effectiveEmail) {
+      setWorkflowLoading(false);
       applyWorkflowConfirmationState({
         assets: false,
         checklist: false,
@@ -718,13 +973,12 @@ export default function App() {
   }
 
   const safeActiveMenu = useMemo(() => {
-    if (menuEnabledMap[activeMenu] === false) return 'dashboard';
-    if (!ADMIN_ONLY_MENUS.includes(activeMenu)) return activeMenu;
-    return isAdmin ? activeMenu : 'dashboard';
-  }, [activeMenu, isAdmin, menuEnabledMap]);
+    if (effectiveMenuEnabledMap[activeMenu] === false) return 'dashboard';
+    return canAccessMenu(activeMenu, effectiveEmail, effectiveRole) ? activeMenu : 'dashboard';
+  }, [activeMenu, effectiveEmail, effectiveRole, effectiveMenuEnabledMap]);
 
   const renderPage = () => {
-    if (ADMIN_ONLY_MENUS.includes(safeActiveMenu) && !isAdmin) {
+    if (!canAccessMenu(safeActiveMenu, effectiveEmail, effectiveRole)) {
       return <NoPermission />;
     }
 
@@ -734,8 +988,9 @@ export default function App() {
       case 'assets':
         return (
           <AssetsPage
-            unlockNextStep={unlockNextStep}
             assetsConfirmed={assetsConfirmed}
+            canEdit={canEditData}
+            canConfirm={canConfirmData}
             onConfirmAssets={handleConfirmAssets}
             onCancelAssetConfirmation={handleCancelAssetConfirmation}
           />
@@ -744,6 +999,8 @@ export default function App() {
         return (
           <ChecklistPage
             checklistConfirmed={checklistConfirmed}
+            canEdit={canEditData}
+            canConfirm={canConfirmData}
             onConfirmChecklist={handleConfirmChecklist}
             onCancelChecklistConfirmation={handleCancelChecklistConfirmation}
           />
@@ -752,8 +1009,9 @@ export default function App() {
         return (
           <TargetRegistrationPage
             onNavigate={setActiveMenu}
-            unlockNextStep={unlockNextStep}
             inspectionConfirmed={inspectionConfirmed}
+            canEdit={canEditData}
+            canConfirm={canConfirmData}
             onConfirmInspectionTargets={handleConfirmInspectionTargets}
             onCancelInspectionConfirmation={handleCancelInspectionConfirmation}
           />
@@ -761,8 +1019,9 @@ export default function App() {
       case 'inspectionResult':
         return (
           <InspectionPage
-            unlockNextStep={unlockNextStep}
             inspectionResultConfirmed={inspectionResultConfirmed}
+            canEdit={canEditData}
+            canConfirm={canConfirmData}
             onConfirmInspectionResults={handleConfirmInspectionResults}
             onCancelInspectionResultsConfirmation={handleCancelInspectionResultsConfirmation}
           />
@@ -770,20 +1029,42 @@ export default function App() {
       case 'vuln':
         return (
           <VulnerabilitiesPage
-            unlockNextStep={unlockNextStep}
             vulnerabilityConfirmed={vulnerabilityConfirmed}
+            canEdit={canEditData}
+            canConfirm={canConfirmData}
             onConfirmVulnerabilities={handleConfirmVulnerabilities}
             onCancelVulnerabilitiesConfirmation={handleCancelVulnerabilitiesConfirmation}
           />
         );
       case 'report':
-        return <ReportPage />;
+        return (
+          <ReportPage
+            canGenerate={canGenerateReport}
+            canDelete={canDeleteReport}
+          />
+        );
       case 'security':
-        return <SecurityPage />;
+        return (
+          <SecurityPage
+            currentUserEmail={effectiveEmail}
+            currentUserRole={effectiveRole}
+          />
+        );
       case 'access':
-        return <AccessControlPage />;
+        return (
+          <AccessControlPage
+            currentUserEmail={effectiveEmail}
+            currentUserRole={effectiveRole}
+            currentUserId={currentUser?.id || session?.user?.id || null}
+          />
+        );
       case 'audit':
-        return <AuditPage />;
+        return (
+          <AuditPage
+            currentUserEmail={effectiveEmail}
+            currentUserRole={effectiveRole}
+          />
+        );
       default:
         return <DashboardPage />;
     }
@@ -802,17 +1083,23 @@ export default function App() {
   }
 
   return (
-    <AppLayout
-      activeMenu={safeActiveMenu}
-      setActiveMenu={setActiveMenu}
-      title={NAV_META[safeActiveMenu]?.title || '취약점 관리 시스템'}
-      desc={NAV_META[safeActiveMenu]?.desc || ''}
-      currentUserRole={isAdmin ? 'admin' : currentUser?.role || 'user'}
-      currentUserEmail={effectiveEmail}
-      onLogout={handleLogout}
-      menuEnabledMap={menuEnabledMap}
-    >
-      {renderPage()}
-    </AppLayout>
+    <>
+      <AppErrorBoundary>
+        <AppLayout
+          activeMenu={safeActiveMenu}
+          setActiveMenu={setActiveMenu}
+          title={NAV_META[safeActiveMenu]?.title || '취약점 관리 시스템'}
+          desc={NAV_META[safeActiveMenu]?.desc || ''}
+          currentUserRole={effectiveRole}
+          currentUserEmail={effectiveEmail}
+          onLogout={handleLogout}
+          menuEnabledMap={effectiveMenuEnabledMap}
+        >
+          {renderPage()}
+        </AppLayout>
+      </AppErrorBoundary>
+
+      <ErrorDialog detail={errorDialog} onClose={() => setErrorDialog(null)} />
+    </>
   );
 }

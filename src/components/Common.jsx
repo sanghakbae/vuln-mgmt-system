@@ -6,7 +6,7 @@ export function Card({ children, className = '' }) {
 
 export function Badge({ children }) {
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-1 text-sm font-semibold ${badgeMap[children] || 'bg-slate-100 text-slate-700'}`}>
+    <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${badgeMap[children] || 'bg-slate-100 text-slate-700'}`}>
       {children}
     </span>
   );

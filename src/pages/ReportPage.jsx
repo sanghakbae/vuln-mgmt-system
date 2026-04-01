@@ -499,7 +499,9 @@ async function buildPreviewReportHtml(row) {
       .order('updated_at', { ascending: false }),
     supabase
       .from('vulnerabilities')
-      .select('*')
+      .select(
+        'id, inspection_result_id, asset_id, item_id, vuln_title, risk_level, action_status, due_date, assignee_name, action_result, review_comment, reviewed_by, updated_at'
+      )
       .order('updated_at', { ascending: false }),
   ]);
 
@@ -811,7 +813,10 @@ function PreviewModal({
   );
 }
 
-export default function ReportPage() {
+export default function ReportPage({
+  canGenerate = false,
+  canDelete = false,
+}) {
   const [rows, setRows] = useState([]);
   const [localRows, setLocalRows] = useState([]);
 
@@ -876,7 +881,9 @@ export default function ReportPage() {
 
       const { data, error } = await supabase
         .from('reports')
-        .select('*')
+        .select(
+          'id, report_name, report_type, report_scope, report_status, generated_by, file_path, generated_at, created_at, updated_at'
+        )
         .order('generated_at', { ascending: false });
 
       if (error) {
@@ -899,6 +906,12 @@ export default function ReportPage() {
   }
 
   function openCreateModal() {
+    if (!canGenerate) {
+      setError('현재 권한으로는 보고서를 생성할 수 없습니다.');
+      setMessage('');
+      return;
+    }
+
     const now = new Date();
     const defaultName = `${now.getFullYear()}년 ${now.getMonth() + 1}월 보안 점검 결과보고서`;
 
@@ -936,7 +949,7 @@ export default function ReportPage() {
           generated_at: now,
           updated_at: now,
         })
-        .select('*')
+        .select('id, report_type, report_name, report_scope, report_status, generated_by, file_path, generated_at, created_at, updated_at')
         .single();
 
       if (error) {
@@ -1013,6 +1026,10 @@ export default function ReportPage() {
 
   async function handleDeleteReport(row) {
     try {
+      if (!canDelete) {
+        throw new Error('현재 권한으로는 보고서를 삭제할 수 없습니다.');
+      }
+
       const ok = window.confirm('이 보고서를 삭제하시겠습니까?');
       if (!ok) return;
 
@@ -1082,6 +1099,10 @@ export default function ReportPage() {
 
   async function handleGenerateReport() {
     try {
+      if (!canGenerate) {
+        throw new Error('현재 권한으로는 보고서를 생성할 수 없습니다.');
+      }
+
       setSaving(true);
       setMessage('');
       setError('');
@@ -1108,7 +1129,9 @@ export default function ReportPage() {
           .order('updated_at', { ascending: false }),
         supabase
           .from('vulnerabilities')
-          .select('*')
+          .select(
+            'id, inspection_result_id, asset_id, item_id, vuln_title, risk_level, action_status, due_date, assignee_name, action_result, review_comment, reviewed_by, updated_at'
+          )
           .order('updated_at', { ascending: false }),
       ]);
 
@@ -1342,10 +1365,10 @@ export default function ReportPage() {
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {kpis.map((item) => (
-          <Card key={item.title} className="p-3 sm:p-3.5 w-full">
-            <div className="text-xs font-medium text-slate-500">{item.title}</div>
-            <div className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{item.value}</div>
-            <div className="mt-1 sm:mt-2 text-xs text-slate-500">{item.sub}</div>
+          <Card key={item.title} className="flex min-h-[112px] w-full flex-col justify-between rounded-2xl p-4">
+            <div className="text-[11px] font-semibold text-slate-500">{item.title}</div>
+            <div className="mt-2 text-[28px] font-bold tracking-tight text-slate-900">{item.value}</div>
+            <div className="mt-1 text-[11px] leading-4 text-slate-500">{item.sub}</div>
           </Card>
         ))}
       </section>
@@ -1373,6 +1396,7 @@ export default function ReportPage() {
 
               <button
                 onClick={openCreateModal}
+                disabled={!canGenerate}
                 className="rounded-lg bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
               >
                 보고서 생성
@@ -1432,6 +1456,7 @@ export default function ReportPage() {
                     >
                       <button
                         onClick={() => handleDeleteReport(row)}
+                        disabled={!canDelete}
                         className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50"
                       >
                         삭제

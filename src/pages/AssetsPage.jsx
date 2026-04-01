@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { exportAssetsWorkbook, parseAssetsWorkbook } from '../utils/assetsWorkbook';
 import { chunkArray, runSupabaseMutation } from '../utils/supabaseMutation';
+import { ASSET_SELECT_COLUMNS } from '../services/assetsService';
 
 const PAGE_SIZE = 25;
 const ASSETS_CACHE_KEY = 'assets-page-cache';
@@ -101,9 +102,9 @@ function normalizeAssetRow(row) {
 
 async function selectAssetsWithFallback() {
   const attempts = [
-    () => supabase.from('assets').select('*').order('updated_at', { ascending: false }),
-    () => supabase.from('assets').select('*').order('asset_code', { ascending: true }),
-    () => supabase.from('assets').select('*'),
+    () => supabase.from('assets').select(ASSET_SELECT_COLUMNS).order('updated_at', { ascending: false }),
+    () => supabase.from('assets').select(ASSET_SELECT_COLUMNS).order('asset_code', { ascending: true }),
+    () => supabase.from('assets').select(ASSET_SELECT_COLUMNS),
   ];
 
   let lastError = null;
@@ -186,7 +187,7 @@ function Badge({ children }) {
 
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+      className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${
         badgeMap[children] || 'bg-slate-100 text-slate-700'
       }`}
     >
@@ -197,8 +198,8 @@ function Badge({ children }) {
 
 function SectionHeader({ title, desc, action }) {
   return (
-    <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
+    <div className="flex min-h-[88px] flex-col gap-4 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex min-h-[56px] flex-col justify-center">
         <div className="text-lg font-semibold">{title}</div>
         <div className="text-xs text-slate-500">{desc}</div>
       </div>
@@ -427,14 +428,14 @@ function AssetEditor({
 }
 
 export default function AssetsPage({
-  unlockNextStep,
   assetsConfirmed = false,
+  canEdit = true,
+  canConfirm = false,
   onConfirmAssets,
   onCancelAssetConfirmation,
 }) {
   const [assetRows, setAssetRows] = useState(() => readAssetsCache().rows);
   const [rawAssetCount, setRawAssetCount] = useState(() => readAssetsCache().rawCount);
-  const [debugInfo, setDebugInfo] = useState('');
   const [keyword, setKeyword] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [message, setMessage] = useState('');
@@ -448,6 +449,8 @@ export default function AssetsPage({
   const [confirmWord, setConfirmWord] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
   const [confirmError, setConfirmError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [cancelingConfirmation, setCancelingConfirmation] = useState(false);
   const fileInputRef = useRef(null);
 
   const toneMap = {
@@ -469,12 +472,6 @@ export default function AssetsPage({
     setConfirmError('');
   }, [assetsConfirmed]);
 
-  useEffect(() => {
-    if (assetRows.length > 0) {
-      setDebugInfo(`cache restored (${assetRows.length})`);
-    }
-  }, []);
-
   async function fetchAssets() {
     if (!supabase) {
       throw new Error('Supabase 설정이 없습니다. .env 파일을 확인하세요.');
@@ -484,7 +481,6 @@ export default function AssetsPage({
     const normalizedRows = data.map(normalizeAssetRow);
 
     setRawAssetCount(data.length);
-    setDebugInfo(`supabase-js ok (${data.length})`);
     setAssetRows(normalizedRows);
 
     writeAssetsCache(normalizedRows, data.length);
@@ -495,7 +491,6 @@ export default function AssetsPage({
     const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
     if (!url || !anonKey) {
-      setDebugInfo('env missing');
       return;
     }
 
@@ -507,10 +502,8 @@ export default function AssetsPage({
         },
       });
 
-      const text = await response.text();
-      setDebugInfo(`rest ${response.status}: ${text.slice(0, 300) || '(empty)'}`);
     } catch (err) {
-      setDebugInfo(`rest fetch failed: ${err?.message || String(err)}`);
+      console.error('assets debug probe 실패:', err);
     }
   }
 
@@ -519,9 +512,6 @@ export default function AssetsPage({
       .catch((err) => {
         console.error(err);
         setError(err.message || '자산 목록 조회 실패');
-        setDebugInfo(
-          `supabase-js failed: ${err?.code ? `${err.code} ` : ''}${err?.message || String(err)}`
-        );
         runAssetsDebugProbe().catch((probeError) => {
           console.error(probeError);
         });
@@ -591,7 +581,7 @@ export default function AssetsPage({
   }, [currentPage, totalPages]);
 
   const handleClickImport = () => {
-    if (assetsConfirmed) return;
+    if (assetsConfirmed || !canEdit) return;
     setMessage('');
     setError('');
     fileInputRef.current?.click();
@@ -664,7 +654,6 @@ export default function AssetsPage({
       setMessage(
         `${parsedRows.length}건 처리 완료 (신규 ${rowsWithoutCode.length}건, 수정 ${rowsWithCode.length}건)`
       );
-      unlockNextStep?.('assets');
     } catch (err) {
       console.error(err);
       setError(err.message || '업로드 실패');
@@ -682,14 +671,14 @@ export default function AssetsPage({
   };
 
   const openCreateModal = () => {
-    if (assetsConfirmed) return;
+    if (assetsConfirmed || !canEdit) return;
     setModalMode('create');
     setForm(EMPTY_FORM);
     setEditorOpen(true);
   };
 
   const openEditModal = (row) => {
-    if (assetsConfirmed) return;
+    if (assetsConfirmed || !canEdit) return;
     if (editorOpen && modalMode === 'edit' && form.id === row.id) {
       setEditorOpen(false);
       return;
@@ -735,6 +724,11 @@ export default function AssetsPage({
   };
 
   const handleSaveAsset = async () => {
+    if (!canEdit) {
+      setError('현재 권한으로는 정보자산을 수정할 수 없습니다.');
+      return;
+    }
+
     if (assetsConfirmed) {
       setError('정보자산이 확정되어 수정할 수 없습니다.');
       return;
@@ -813,7 +807,12 @@ export default function AssetsPage({
     }
   };
 
-  const handleConfirmAssets = () => {
+  const handleConfirmAssets = async () => {
+    if (!canConfirm) {
+      setConfirmError('현재 권한으로는 정보자산을 확정할 수 없습니다.');
+      return;
+    }
+
     if (assetsConfirmed) return;
 
     setMessage('');
@@ -830,23 +829,51 @@ export default function AssetsPage({
       return;
     }
 
-    onConfirmAssets?.();
-    unlockNextStep?.('assets');
-    setMessage('정보자산이 확정되었습니다. 점검 대상 관리가 활성화되었습니다.');
+    try {
+      setConfirming(true);
+      await onConfirmAssets?.();
+      setMessage('정보자산이 확정되었습니다. 점검 대상 관리가 활성화되었습니다.');
+    } catch (err) {
+      console.error(err);
+      setConfirmError(err.message || '정보자산 확정 실패');
+    } finally {
+      setConfirming(false);
+    }
   };
+
+  async function handleCancelConfirmation() {
+    if (!canConfirm) {
+      setError('현재 권한으로는 정보자산 확정을 취소할 수 없습니다.');
+      return;
+    }
+
+    try {
+      setCancelingConfirmation(true);
+      setMessage('');
+      setError('');
+      setConfirmError('');
+      await onCancelAssetConfirmation?.();
+      setMessage('정보자산 확정이 취소되었습니다.');
+    } catch (err) {
+      console.error(err);
+      setError(err.message || '정보자산 확정 취소 실패');
+    } finally {
+      setCancelingConfirmation(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
-      <Card className={assetsConfirmed ? 'border-emerald-300 bg-emerald-50/70' : 'border-slate-200'}>
-        <div className="flex w-full flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <Card className={assetsConfirmed ? 'border-emerald-300 bg-emerald-50/70' : 'border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700'}>
+        <div className="flex min-h-[72px] w-full flex-col gap-2 px-5 py-2.5 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+            <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${assetsConfirmed ? 'text-slate-600' : 'text-slate-200'}`}>
               <span>자산 등록과 검토가 끝났다면 확인키를 입력해 확정하세요.</span>
               {assetsConfirmed ? (
                 <span className="text-xs font-semibold text-slate-900">확정 완료</span>
               ) : (
-                <span className="text-xs font-semibold text-slate-900">
-                  확인키: <span className="text-rose-600">{confirmWord || '-'}</span>
+                <span className="inline-flex items-center rounded-md bg-white/12 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-inset ring-white/10">
+                  확인키: <span className="ml-1 font-bold text-rose-400">{confirmWord || '-'}</span>
                 </span>
               )}
             </div>
@@ -858,11 +885,16 @@ export default function AssetsPage({
                 정보자산 확정 완료
               </div>
               <button
-                onClick={onCancelAssetConfirmation}
+                onClick={handleCancelConfirmation}
+                disabled={cancelingConfirmation || !canConfirm}
                 className="inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700"
               >
-                정보자산 확정 취소
+                {cancelingConfirmation ? '취소 중...' : '정보자산 확정 취소'}
               </button>
+            </div>
+          ) : !canConfirm ? (
+            <div className="inline-flex h-8 items-center rounded-lg border border-white/15 bg-white/10 px-3 text-xs font-medium text-slate-200">
+              확정 권한 없음
             </div>
           ) : (
             <div className="flex w-full flex-col gap-2 text-right lg:flex-1 lg:items-end">
@@ -870,14 +902,16 @@ export default function AssetsPage({
                 <input
                   value={confirmInput}
                   onChange={(e) => setConfirmInput(e.target.value)}
-                  className="h-8 w-full rounded-lg border border-slate-300 bg-white px-3 text-xs outline-none sm:max-w-[240px]"
+                  disabled={confirming || !canConfirm}
+                  className="h-8 w-full rounded-lg border border-white/15 bg-white/95 px-3 text-xs text-slate-900 outline-none sm:max-w-[240px]"
                   placeholder="확인키를 정확히 입력하세요"
                 />
                 <button
                   onClick={handleConfirmAssets}
-                  className="inline-flex h-8 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white sm:w-auto"
+                  disabled={confirming || !canConfirm}
+                  className="inline-flex h-8 items-center rounded-lg bg-white px-3 text-xs font-semibold text-slate-900 sm:w-auto"
                 >
-                  정보자산 확정
+                  {confirming ? '확정 중...' : '정보자산 확정'}
                 </button>
               </div>
               {confirmError ? (
@@ -888,9 +922,12 @@ export default function AssetsPage({
         </div>
       </Card>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-3 gap-3">
         {assetKpis.map((item) => (
-          <Card key={item.title} className={`w-full rounded-2xl p-4 ${toneMap[item.tone]}`}>
+          <Card
+            key={item.title}
+            className={`flex min-h-[112px] w-full flex-col justify-between rounded-2xl p-4 ${toneMap[item.tone]}`}
+          >
             <div className="text-[11px] font-semibold text-slate-500">{item.title}</div>
             <div className="mt-2 text-[28px] font-bold tracking-tight text-slate-900">{item.value}</div>
             <div className="mt-1 text-[11px] leading-4 text-slate-500">{item.sub}</div>
@@ -920,7 +957,7 @@ export default function AssetsPage({
                 />
                 <button
                   onClick={handleClickImport}
-                  disabled={loading || assetsConfirmed}
+                  disabled={loading || assetsConfirmed || !canEdit}
                   className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 disabled:opacity-50"
                 >
                   {loading ? '업로드 중...' : '엑셀 Import'}
@@ -933,7 +970,7 @@ export default function AssetsPage({
                 </button>
                 <button
                   onClick={openCreateModal}
-                  disabled={assetsConfirmed}
+                  disabled={assetsConfirmed || !canEdit}
                   className="rounded-lg bg-black px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-black disabled:text-white disabled:opacity-100"
                 >
                   자산 등록
@@ -951,11 +988,6 @@ export default function AssetsPage({
               )}
             </div>
           )}
-
-          <div className="border-b border-slate-200 bg-slate-50 px-5 py-2 text-xs text-slate-500">
-            연결 URL: {import.meta.env.VITE_SUPABASE_URL || '없음'} | 조회 건수:{' '}
-            {rawAssetCount ?? '-'}
-          </div>
 
           <div className="border-b border-slate-200 bg-slate-50 px-5 py-3">
             <div className="flex flex-wrap gap-2">
@@ -996,9 +1028,9 @@ export default function AssetsPage({
                 {pagedRows.map((row) => (
                   <Fragment key={row.id ?? row.asset_code}>
                     <tr
-                      onClick={() => openEditModal(row)}
+                      onClick={canEdit ? () => openEditModal(row) : undefined}
                       className={`border-t border-slate-100 ${
-                        assetsConfirmed
+                        assetsConfirmed || !canEdit
                           ? 'cursor-default'
                           : 'cursor-pointer hover:bg-slate-50'
                       }`}

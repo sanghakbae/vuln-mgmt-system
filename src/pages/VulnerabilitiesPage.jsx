@@ -37,8 +37,8 @@ function Card({ children, className = '' }) {
 
 function SectionHeader({ title, desc, action }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
-      <div>
+    <div className="flex min-h-[88px] flex-col gap-3 border-b border-slate-200 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex min-h-[56px] flex-col justify-center">
         <div className="text-lg font-semibold text-slate-900">{title}</div>
         <div className="mt-0.5 text-xs text-slate-500">{desc}</div>
       </div>
@@ -59,7 +59,7 @@ function Badge({ value }) {
 
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+      className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${
         styleMap[value] || 'bg-slate-100 text-slate-700'
       }`}
     >
@@ -264,7 +264,9 @@ function VulnerabilityRow({ row, expanded, onToggle, saving, reviewerName, onSav
     <>
       <tr
         onClick={onToggle}
-        className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+        className={`border-t border-slate-100 ${
+          locked ? 'cursor-default' : 'cursor-pointer hover:bg-slate-50'
+        }`}
       >
         <td className="px-3 py-2 text-center whitespace-nowrap">{row.asset_code || '-'}</td>
         <td className="px-3 py-2 text-center whitespace-nowrap">
@@ -305,6 +307,8 @@ function VulnerabilityRow({ row, expanded, onToggle, saving, reviewerName, onSav
 
 export default function VulnerabilityPage({
   vulnerabilityConfirmed = false,
+  canEdit = true,
+  canConfirm = false,
   onConfirmVulnerabilities,
   onCancelVulnerabilitiesConfirmation,
 }) {
@@ -329,6 +333,8 @@ export default function VulnerabilityPage({
   const [confirmWord, setConfirmWord] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
   const [confirmError, setConfirmError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [cancelingConfirmation, setCancelingConfirmation] = useState(false);
 
   useEffect(() => {
     if (vulnerabilityConfirmed) return;
@@ -342,6 +348,59 @@ export default function VulnerabilityPage({
     setConfirmInput('');
     setConfirmError('');
   }, [vulnerabilityConfirmed]);
+
+  async function handleConfirmVulnerabilitiesClick() {
+    if (!canConfirm) {
+      setConfirmError('현재 권한으로는 취약점을 확정할 수 없습니다.');
+      return;
+    }
+
+    setMessage('');
+    setError('');
+    setConfirmError('');
+
+    if (!rows.length) {
+      setConfirmError('확정할 취약점 항목이 없습니다.');
+      return;
+    }
+
+    if (confirmInput.trim() !== confirmWord) {
+      setConfirmError('확인키가 일치하지 않습니다.');
+      return;
+    }
+
+    try {
+      setConfirming(true);
+      await onConfirmVulnerabilities?.();
+      setMessage('취약점 관리가 확정되었습니다. 보고서 관리가 활성화되었습니다.');
+    } catch (err) {
+      console.error(err);
+      setConfirmError(err.message || '취약점 관리 확정 실패');
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleCancelVulnerabilitiesClick() {
+    if (!canConfirm) {
+      setError('현재 권한으로는 취약점 확정을 취소할 수 없습니다.');
+      return;
+    }
+
+    try {
+      setCancelingConfirmation(true);
+      setMessage('');
+      setError('');
+      setConfirmError('');
+      await onCancelVulnerabilitiesConfirmation?.();
+      setMessage('취약점 관리 확정이 취소되었습니다.');
+    } catch (err) {
+      console.error(err);
+      setError(err.message || '취약점 관리 확정 취소 실패');
+    } finally {
+      setCancelingConfirmation(false);
+    }
+  }
 
   useEffect(() => {
     async function init() {
@@ -383,7 +442,9 @@ export default function VulnerabilityPage({
   async function fetchVulnerabilities() {
     const { data, error } = await supabase
       .from('vulnerabilities')
-      .select('*')
+      .select(
+        'id, inspection_result_id, asset_id, item_id, vuln_title, risk_level, action_status, due_date, assignee_name, action_result, review_comment, reviewed_by, updated_at'
+      )
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
@@ -493,6 +554,10 @@ export default function VulnerabilityPage({
         throw new Error('취약점 확정 후에는 저장할 수 없습니다.');
       }
 
+      if (!canEdit) {
+        throw new Error('현재 권한으로는 취약점 조치 정보를 수정할 수 없습니다.');
+      }
+
       setSaving(true);
       setMessage('');
       setError('');
@@ -541,16 +606,16 @@ export default function VulnerabilityPage({
 
   return (
     <div className="space-y-4">
-      <Card className={vulnerabilityConfirmed ? 'border-emerald-300 bg-emerald-50/70' : ''}>
-        <div className="flex w-full flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <Card className={vulnerabilityConfirmed ? 'border-emerald-300 bg-emerald-50/70' : 'border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700'}>
+        <div className="flex min-h-[72px] w-full flex-col gap-2 px-5 py-2.5 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+            <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${vulnerabilityConfirmed ? 'text-slate-600' : 'text-slate-200'}`}>
               <span>취약점 조치 검토가 끝났다면 확인키를 입력해 확정하세요.</span>
               {vulnerabilityConfirmed ? (
                 <span className="text-xs font-semibold text-slate-900">확정 완료</span>
               ) : (
-                <span className="text-xs font-semibold text-slate-900">
-                  확인키: <span className="text-rose-600">{confirmWord || '-'}</span>
+                <span className="inline-flex items-center rounded-md bg-white/12 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-inset ring-white/10">
+                  확인키: <span className="ml-1 font-bold text-rose-400">{confirmWord || '-'}</span>
                 </span>
               )}
             </div>
@@ -562,11 +627,16 @@ export default function VulnerabilityPage({
                 취약점 확정 완료
               </div>
               <button
-                onClick={onCancelVulnerabilitiesConfirmation}
+                onClick={handleCancelVulnerabilitiesClick}
+                disabled={cancelingConfirmation || !canConfirm}
                 className="inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700"
               >
-                취약점 확정 취소
+                {cancelingConfirmation ? '취소 중...' : '취약점 확정 취소'}
               </button>
+            </div>
+          ) : !canConfirm ? (
+            <div className="inline-flex h-8 items-center rounded-lg border border-white/15 bg-white/10 px-3 text-xs font-medium text-slate-200">
+              확정 권한 없음
             </div>
           ) : (
             <div className="flex w-full flex-col gap-2 text-right lg:flex-1 lg:items-end">
@@ -574,28 +644,16 @@ export default function VulnerabilityPage({
                 <input
                   value={confirmInput}
                   onChange={(e) => setConfirmInput(e.target.value)}
-                  className="h-8 w-full rounded-lg border border-slate-300 bg-white px-3 text-xs outline-none sm:max-w-[240px]"
+                  disabled={confirming || !canConfirm}
+                  className="h-8 w-full rounded-lg border border-white/15 bg-white/95 px-3 text-xs text-slate-900 outline-none sm:max-w-[240px]"
                   placeholder="확인키를 정확히 입력하세요"
                 />
                 <button
-                  onClick={() => {
-                    setMessage('');
-                    setError('');
-                    setConfirmError('');
-                    if (!rows.length) {
-                      setConfirmError('확정할 취약점 항목이 없습니다.');
-                      return;
-                    }
-                    if (confirmInput.trim() !== confirmWord) {
-                      setConfirmError('확인키가 일치하지 않습니다.');
-                      return;
-                    }
-                    onConfirmVulnerabilities?.();
-                    setMessage('취약점 관리가 확정되었습니다. 보고서 관리가 활성화되었습니다.');
-                  }}
-                  className="inline-flex h-8 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white sm:w-auto"
+                  onClick={handleConfirmVulnerabilitiesClick}
+                  disabled={confirming || !canConfirm}
+                  className="inline-flex h-8 items-center rounded-lg bg-white px-3 text-xs font-semibold text-slate-900 sm:w-auto"
                 >
-                  취약점 확정
+                  {confirming ? '확정 중...' : '취약점 확정'}
                 </button>
               </div>
               {confirmError ? <div className="text-xs text-rose-600">{confirmError}</div> : null}
@@ -606,10 +664,10 @@ export default function VulnerabilityPage({
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((item) => (
-          <Card key={item.title} className="p-3 sm:p-3.5 w-full">
-            <div className="text-xs font-medium text-slate-500">{item.title}</div>
-            <div className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{item.value}</div>
-            <div className="mt-1 sm:mt-2 text-xs text-slate-500">{item.sub}</div>
+          <Card key={item.title} className="flex min-h-[112px] w-full flex-col justify-between rounded-2xl p-4">
+            <div className="text-[11px] font-semibold text-slate-500">{item.title}</div>
+            <div className="mt-2 text-[28px] font-bold tracking-tight text-slate-900">{item.value}</div>
+            <div className="mt-1 text-[11px] leading-4 text-slate-500">{item.sub}</div>
           </Card>
         ))}
       </section>
@@ -714,7 +772,7 @@ export default function VulnerabilityPage({
                     reviewerName={reviewerName}
                     onSave={handleSaveInline}
                     saving={saving}
-                    locked={vulnerabilityConfirmed}
+                    locked={vulnerabilityConfirmed || !canEdit}
                   />
                 ))
               )}

@@ -1,5 +1,27 @@
 import { supabase } from '../lib/supabase';
 
+export const ASSET_SELECT_COLUMNS = [
+  'id',
+  'asset_code',
+  'asset_type',
+  'hostname',
+  'ip_address',
+  'os_version',
+  'related_service',
+  'purpose',
+  'location',
+  'department',
+  'owner_name',
+  'manager_name',
+  'confidentiality',
+  'integrity',
+  'availability',
+  'criticality_score',
+  'criticality_grade',
+  'status',
+  'updated_at',
+].join(', ');
+
 function inferAssetType(row) {
   const explicitType = String(row?.asset_type || '').trim().toUpperCase();
   if (explicitType) return explicitType;
@@ -25,9 +47,9 @@ function normalizeAssetRow(row) {
 
 async function selectAssetsWithFallback() {
   const attempts = [
-    () => supabase.from('assets').select('*').order('updated_at', { ascending: false }),
-    () => supabase.from('assets').select('*').order('asset_code', { ascending: true }),
-    () => supabase.from('assets').select('*'),
+    () => supabase.from('assets').select(ASSET_SELECT_COLUMNS).order('updated_at', { ascending: false }),
+    () => supabase.from('assets').select(ASSET_SELECT_COLUMNS).order('asset_code', { ascending: true }),
+    () => supabase.from('assets').select(ASSET_SELECT_COLUMNS),
   ];
 
   let lastError = null;

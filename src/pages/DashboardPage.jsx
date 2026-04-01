@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
   BadgeCheck,
-  BarChart3,
   ClipboardList,
   FileText,
   Layers3,
@@ -14,6 +13,7 @@ import {
 import { supabase } from '../lib/supabase';
 
 const DASHBOARD_SUMMARY_CACHE_KEY = 'dashboard-summary-cache';
+const DASHBOARD_SNAPSHOT_CACHE_KEY = 'dashboard-snapshot-cache';
 
 function Card({ children, className = '' }) {
   return (
@@ -46,15 +46,17 @@ function KpiCard({ title, value, sub, icon: Icon, tone }) {
   };
 
   return (
-    <div className={`rounded-2xl bg-gradient-to-br ${toneMap[tone]} p-4 shadow-sm`}>
+    <div
+      className={`flex min-h-[112px] flex-col justify-between rounded-xl bg-gradient-to-br ${toneMap[tone]} p-2.5 xl:rounded-2xl xl:p-3 2xl:p-4 shadow-sm`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-medium text-white/85">{title}</div>
-          <div className="mt-2 text-[28px] font-bold tracking-tight">{value}</div>
-          <div className="mt-1 text-[11px] text-white/80">{sub}</div>
+          <div className="text-[10px] xl:text-[10px] 2xl:text-xs font-medium leading-4 text-white/85">{title}</div>
+          <div className="mt-1 text-[18px] xl:text-[18px] 2xl:text-[28px] font-bold tracking-tight">{value}</div>
+          <div className="mt-0.5 text-[9px] xl:text-[9px] 2xl:text-[11px] leading-3.5 text-white/80">{sub}</div>
         </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20">
-          <Icon size={18} />
+        <div className="flex h-7 w-7 xl:h-8 xl:w-8 2xl:h-10 2xl:w-10 items-center justify-center rounded-xl xl:rounded-2xl bg-white/20">
+          <Icon size={14} />
         </div>
       </div>
     </div>
@@ -114,7 +116,7 @@ function StatusBadge({ children, tone = 'slate' }) {
   };
 
   return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${toneMap[tone]}`}>
+    <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${toneMap[tone]}`}>
       {children}
     </span>
   );
@@ -122,20 +124,20 @@ function StatusBadge({ children, tone = 'slate' }) {
 
 function SimpleTable({ rows, columns, emptyText = '표시할 데이터가 없습니다.' }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-xs">
+    <div className="w-full">
+      <table className="w-full table-fixed text-[11px] sm:text-xs">
         <thead className="bg-slate-50 text-slate-500">
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-3 py-2 font-semibold ${
+                className={`px-2 py-2 font-semibold sm:px-3 ${
                   col.align === 'right'
                     ? 'text-right'
                     : col.align === 'left'
                     ? 'text-left'
                     : 'text-center'
-                } whitespace-nowrap`}
+                } break-words`}
               >
                 {col.label}
               </th>
@@ -145,7 +147,7 @@ function SimpleTable({ rows, columns, emptyText = '표시할 데이터가 없습
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="px-3 py-6 text-center text-slate-400">
+              <td colSpan={columns.length} className="px-2 py-6 text-center text-[11px] text-slate-400 sm:px-3 sm:text-xs">
                 {emptyText}
               </td>
             </tr>
@@ -155,13 +157,13 @@ function SimpleTable({ rows, columns, emptyText = '표시할 데이터가 없습
                 {columns.map((col) => (
                   <td
                     key={col.key}
-                    className={`px-3 py-2 text-slate-700 ${
+                    className={`px-2 py-2 text-[11px] text-slate-700 sm:px-3 sm:text-xs ${
                       col.align === 'right'
                         ? 'text-right'
                         : col.align === 'left'
                         ? 'text-left'
                         : 'text-center'
-                    } whitespace-nowrap`}
+                    } break-words align-top`}
                   >
                     {row[col.key]}
                   </td>
@@ -190,9 +192,11 @@ export default function DashboardPage() {
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summary, setSummary] = useState({
     totalAssets: 0,
+    checklistCount: 0,
     targetCount: 0,
     vulnerableCount: 0,
     completedCount: 0,
+    reportCount: 0,
   });
   const [progressData, setProgressData] = useState([]);
   const [assetDistribution, setAssetDistribution] = useState([]);
@@ -203,6 +207,44 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    try {
+      const cachedSnapshot = window.sessionStorage.getItem(DASHBOARD_SNAPSHOT_CACHE_KEY);
+      if (cachedSnapshot) {
+        const parsed = JSON.parse(cachedSnapshot);
+
+        if (parsed?.summary) {
+          setSummary(parsed.summary);
+          setSummaryLoading(false);
+        }
+
+        if (Array.isArray(parsed?.progressData)) {
+          setProgressData(parsed.progressData);
+        }
+
+        if (Array.isArray(parsed?.assetDistribution)) {
+          setAssetDistribution(parsed.assetDistribution);
+        }
+
+        if (Array.isArray(parsed?.recentInspections)) {
+          setRecentInspections(parsed.recentInspections);
+        }
+
+        if (Array.isArray(parsed?.recentActions)) {
+          setRecentActions(parsed.recentActions);
+        }
+
+        if (Array.isArray(parsed?.recentReports)) {
+          setRecentReports(parsed.recentReports);
+        }
+
+        if (parsed?.riskDistribution) {
+          setRiskDistribution(parsed.riskDistribution);
+        }
+      }
+    } catch (err) {
+      console.error('dashboard snapshot cache parse 실패:', err);
+    }
+
     try {
       const cached = window.sessionStorage.getItem(DASHBOARD_SUMMARY_CACHE_KEY);
       if (cached) {
@@ -220,34 +262,43 @@ export default function DashboardPage() {
   }, []);
 
   async function loadSummary() {
-    const [assetsCountRes, targetsCountRes, vulnerableCountRes, completedCountRes] =
+    const [assetsCountRes, checklistCountRes, targetsCountRes, vulnerableCountRes, completedCountRes, reportCountRes] =
       await Promise.all([
-        supabase.from('assets').select('id', { count: 'exact', head: true }),
+        supabase.from('assets').select('id', { count: 'planned', head: true }),
+        supabase
+          .from('check_items')
+          .select('id', { count: 'planned', head: true })
+          .eq('use_yn', '사용'),
         supabase
           .from('inspection_targets')
-          .select('id', { count: 'exact', head: true })
+          .select('id', { count: 'planned', head: true })
           .in('target_status', ['선정', '점검중', '점검완료']),
         supabase
           .from('inspection_results')
-          .select('id', { count: 'exact', head: true })
+          .select('id', { count: 'planned', head: true })
           .eq('result_status', '취약'),
         supabase
           .from('inspection_results')
-          .select('id', { count: 'exact', head: true })
+          .select('id', { count: 'planned', head: true })
           .not('result_status', 'is', null)
           .neq('result_status', '미점검'),
+        supabase.from('reports').select('id', { count: 'planned', head: true }),
       ]);
 
     if (assetsCountRes.error) throw assetsCountRes.error;
+    if (checklistCountRes.error) throw checklistCountRes.error;
     if (targetsCountRes.error) throw targetsCountRes.error;
     if (vulnerableCountRes.error) throw vulnerableCountRes.error;
     if (completedCountRes.error) throw completedCountRes.error;
+    if (reportCountRes.error) throw reportCountRes.error;
 
     const nextSummary = {
       totalAssets: assetsCountRes.count || 0,
+      checklistCount: checklistCountRes.count || 0,
       targetCount: targetsCountRes.count || 0,
       vulnerableCount: vulnerableCountRes.count || 0,
       completedCount: completedCountRes.count || 0,
+      reportCount: reportCountRes.count || 0,
     };
 
     setSummary(nextSummary);
@@ -340,12 +391,13 @@ export default function DashboardPage() {
         )
       ).length;
 
-      setProgressData([
+      const nextProgressData = [
         { label: '대상 선정', value: selectedCount, total: assets.length || 1, tone: 'blue' },
         { label: '점검 진행', value: inProgressCount, total: assets.length || 1, tone: 'amber' },
         { label: '조치 진행', value: actionInProgressCount, total: assets.length || 1, tone: 'violet' },
         { label: '점검 완료', value: doneCount, total: assets.length || 1, tone: 'emerald' },
-      ]);
+      ];
+      setProgressData(nextProgressData);
 
       const typeCountMap = assets.reduce((acc, row) => {
         const key = row.asset_type || 'ETC';
@@ -353,7 +405,7 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-      setAssetDistribution(
+      const nextAssetDistribution =
         [
           { key: 'SERVER', colorClass: 'bg-sky-500' },
           { key: 'DATABASE', colorClass: 'bg-violet-500' },
@@ -368,11 +420,10 @@ export default function DashboardPage() {
             value: typeCountMap[item.key] || 0,
             colorClass: item.colorClass,
           }))
-          .filter((item) => item.value > 0)
-      );
+          .filter((item) => item.value > 0);
+      setAssetDistribution(nextAssetDistribution);
 
-      setRecentInspections(
-        recentResults.map((row) => {
+      const nextRecentInspections = recentResults.map((row) => {
           let tone = 'slate';
           if (row.result_status === '취약') tone = 'rose';
           else if (row.result_status === '양호') tone = 'emerald';
@@ -388,11 +439,10 @@ export default function DashboardPage() {
               ? String(row.checked_at).slice(0, 16).replace('T', ' ')
               : '-',
           };
-        })
-      );
+        });
+      setRecentInspections(nextRecentInspections);
 
-      setRecentActions(
-        recentVulns.map((row) => {
+      const nextRecentActions = recentVulns.map((row) => {
           let tone = 'amber';
           if (['완료', 'DONE'].includes(row.action_status)) tone = 'emerald';
           else if (['조치중', 'IN_PROGRESS'].includes(row.action_status)) tone = 'blue';
@@ -406,24 +456,54 @@ export default function DashboardPage() {
             status: <StatusBadge tone={tone}>{row.action_status || '-'}</StatusBadge>,
             owner: '-',
           };
-        })
-      );
+        });
+      setRecentActions(nextRecentActions);
 
-      setRecentReports(
-        reportsRows.map((row) => ({
+      const nextRecentReports = reportsRows.map((row) => ({
           name: row.report_name || row.title || '-',
           type: row.report_type || row.scope || '-',
           created: row.created_at
             ? String(row.created_at).slice(0, 16).replace('T', ' ')
             : '-',
-        }))
-      );
+        }));
+      setRecentReports(nextRecentReports);
 
-      setRiskDistribution({
+      const nextRiskDistribution = {
         high: results.filter((row) => row.result_status === '취약' && row.risk_level === '상').length,
         medium: results.filter((row) => row.result_status === '취약' && row.risk_level === '중').length,
         low: results.filter((row) => row.result_status === '취약' && row.risk_level === '하').length,
-      });
+      };
+      setRiskDistribution(nextRiskDistribution);
+
+      try {
+        window.sessionStorage.setItem(
+          DASHBOARD_SNAPSHOT_CACHE_KEY,
+          JSON.stringify({
+            summary: nextSummary,
+            progressData: nextProgressData,
+            assetDistribution: nextAssetDistribution,
+            recentInspections: nextRecentInspections.map((row) => ({
+              ...row,
+              resultTone:
+                row.result?.props?.tone || 'slate',
+              resultLabel:
+                row.result?.props?.children || '-',
+            })),
+            recentActions: nextRecentActions.map((row) => ({
+              ...row,
+              statusTone:
+                row.status?.props?.tone || 'slate',
+              statusLabel:
+                row.status?.props?.children || '-',
+            })),
+            recentReports: nextRecentReports,
+            riskDistribution: nextRiskDistribution,
+            updatedAt: Date.now(),
+          })
+        );
+      } catch (err) {
+        console.error('dashboard snapshot cache save 실패:', err);
+      }
     } catch (err) {
       console.error(err);
       setError(err.message || '대시보드 조회 실패');
@@ -438,6 +518,34 @@ export default function DashboardPage() {
     [assetDistribution]
   );
 
+  const inspectionRowsForView = useMemo(
+    () =>
+      recentInspections.map((row) => ({
+        ...row,
+        result:
+          React.isValidElement(row.result) ? (
+            row.result
+          ) : (
+            <StatusBadge tone={row.resultTone || 'slate'}>{row.resultLabel || row.result || '-'}</StatusBadge>
+          ),
+      })),
+    [recentInspections]
+  );
+
+  const actionRowsForView = useMemo(
+    () =>
+      recentActions.map((row) => ({
+        ...row,
+        status:
+          React.isValidElement(row.status) ? (
+            row.status
+          ) : (
+            <StatusBadge tone={row.statusTone || 'slate'}>{row.statusLabel || row.status || '-'}</StatusBadge>
+          ),
+      })),
+    [recentActions]
+  );
+
   return (
     <div className="space-y-3">
       {error ? (
@@ -446,7 +554,7 @@ export default function DashboardPage() {
         </Card>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-3 gap-3 md:grid-cols-2 xl:grid-cols-6">
         <KpiCard
           title="전체 자산"
           value={summaryLoading ? '-' : summary.totalAssets}
@@ -455,25 +563,39 @@ export default function DashboardPage() {
           tone="blue"
         />
         <KpiCard
-          title="점검 대상"
-          value={summaryLoading ? '-' : summary.targetCount}
-          sub="현재 점검 대상 수"
-          icon={Target}
+          title="사용 중 기준"
+          value={summaryLoading ? '-' : summary.checklistCount}
+          sub="활성 점검 기준 수"
+          icon={ClipboardList}
           tone="violet"
         />
         <KpiCard
-          title="취약 건수"
-          value={summaryLoading ? '-' : summary.vulnerableCount}
-          sub="취약 판정 결과"
-          icon={AlertTriangle}
-          tone="rose"
+          title="점검 대상"
+          value={summaryLoading ? '-' : summary.targetCount}
+          sub="현재 선정된 자산 수"
+          icon={Target}
+          tone="emerald"
         />
         <KpiCard
           title="점검 완료"
           value={summaryLoading ? '-' : summary.completedCount}
-          sub="미점검 제외 결과 수"
+          sub="결과 등록 완료 수"
           icon={BadgeCheck}
-          tone="emerald"
+          tone="blue"
+        />
+        <KpiCard
+          title="미조치 취약점"
+          value={summaryLoading ? '-' : summary.vulnerableCount}
+          sub="취약 판정 누적 수"
+          icon={AlertTriangle}
+          tone="rose"
+        />
+        <KpiCard
+          title="보고서"
+          value={summaryLoading ? '-' : summary.reportCount}
+          sub="생성된 보고서 수"
+          icon={FileText}
+          tone="violet"
         />
       </section>
 
@@ -531,7 +653,7 @@ export default function DashboardPage() {
               { key: 'result', label: '결과' },
               { key: 'time', label: '시간' },
             ]}
-            rows={recentInspections}
+            rows={inspectionRowsForView}
           />
         </Card>
 
@@ -548,13 +670,13 @@ export default function DashboardPage() {
               { key: 'status', label: '상태' },
               { key: 'owner', label: '담당' },
             ]}
-            rows={recentActions}
+            rows={actionRowsForView}
           />
         </Card>
 
         <Card className="overflow-hidden">
           <SectionTitle
-            icon={BarChart3}
+            icon={FileText}
             title="최근 보고서 생성"
             desc="최근 생성된 보고서"
           />
@@ -570,64 +692,6 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
-        <Card className="overflow-hidden">
-          <SectionTitle icon={AlertTriangle} title="위험도 분포" />
-          <div className="grid grid-cols-3 gap-2 px-4 py-4">
-            <div className="rounded-xl bg-rose-50 px-3 py-3 text-center">
-              <div className="text-[11px] font-medium text-rose-600">상</div>
-              <div className="mt-1 text-lg font-bold text-rose-700">
-                {loading ? '-' : riskDistribution.high}
-              </div>
-            </div>
-            <div className="rounded-xl bg-amber-50 px-3 py-3 text-center">
-              <div className="text-[11px] font-medium text-amber-600">중</div>
-              <div className="mt-1 text-lg font-bold text-amber-700">
-                {loading ? '-' : riskDistribution.medium}
-              </div>
-            </div>
-            <div className="rounded-xl bg-emerald-50 px-3 py-3 text-center">
-              <div className="text-[11px] font-medium text-emerald-600">하</div>
-              <div className="mt-1 text-lg font-bold text-emerald-700">
-                {loading ? '-' : riskDistribution.low}
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <SectionTitle icon={FileText} title="점검 상태 요약" />
-          <div className="space-y-2 px-4 py-4 text-xs">
-            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <span className="text-slate-600">취약</span>
-              <span className="font-semibold text-rose-600">{summary.vulnerableCount}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <span className="text-slate-600">점검 완료</span>
-              <span className="font-semibold text-slate-900">{summary.completedCount}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <span className="text-slate-600">점검 대상</span>
-              <span className="font-semibold text-slate-900">{summary.targetCount}</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <SectionTitle icon={BadgeCheck} title="운영 포인트" />
-          <div className="space-y-2 px-4 py-4 text-xs text-slate-600">
-            <div className="rounded-xl bg-sky-50 px-3 py-2 text-sky-700">
-              최근 점검 결과와 취약 조치 상태를 실데이터로 집계합니다.
-            </div>
-            <div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-700">
-              reports 테이블이 없거나 비어 있으면 보고서 영역은 빈 상태로 표시됩니다.
-            </div>
-            <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-700">
-              자산 유형 분포와 점검 진행 상황은 DB 기준으로 자동 계산됩니다.
-            </div>
-          </div>
-        </Card>
-      </section>
     </div>
   );
 }

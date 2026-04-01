@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { runSupabaseMutation } from '../utils/supabaseMutation';
-
-const ADMIN_EMAIL_FALLBACKS = ['shbae@muhayu.com'];
+import { reportAppError } from '../utils/errorDialog';
+import {
+  DEFAULT_ALLOWED_DOMAINS_TEXT,
+  isAdminUser,
+} from '../utils/securityDefaults';
 
 function Card({ children, className = '' }) {
   return (
@@ -33,9 +36,11 @@ function NoPermission() {
   );
 }
 
-export default function SecurityPage() {
-  const [roleLoading, setRoleLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+export default function SecurityPage({
+  currentUserEmail = '',
+  currentUserRole = '',
+}) {
+  const isAdmin = isAdminUser(currentUserEmail, currentUserRole);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,7 +48,7 @@ export default function SecurityPage() {
   const [settingsRowId, setSettingsRowId] = useState(null);
   const [form, setForm] = useState({
     google_oauth_enabled: true,
-    allowed_domains: 'muhayu.com,gmail.com',
+    allowed_domains: DEFAULT_ALLOWED_DOMAINS_TEXT,
     session_timeout_minutes: 60,
     updated_by: 'system',
     updated_at: '',
@@ -53,60 +58,10 @@ export default function SecurityPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    checkRole();
-  }, []);
-
-  useEffect(() => {
     if (isAdmin) {
       loadSettings();
     }
   }, [isAdmin]);
-
-  async function checkRole() {
-    try {
-      setRoleLoading(true);
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-
-      const email = authData?.user?.email || '';
-      const userId = authData?.user?.id;
-
-      if (!userId) {
-        setIsAdmin(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('users')
-        .select('role,email')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('권한 조회 실패:', error.message);
-      }
-
-      const admin =
-        data?.role === 'admin' ||
-        ADMIN_EMAIL_FALLBACKS.includes(email) ||
-        ADMIN_EMAIL_FALLBACKS.includes(data?.email || '');
-
-      setIsAdmin(Boolean(admin));
-    } catch (err) {
-      console.error('권한 확인 실패:', err);
-
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        const email = authData?.user?.email || '';
-        setIsAdmin(ADMIN_EMAIL_FALLBACKS.includes(email));
-      } catch {
-        setIsAdmin(false);
-      }
-    } finally {
-      setRoleLoading(false);
-    }
-  }
 
   async function loadSettings() {
     try {
@@ -116,7 +71,7 @@ export default function SecurityPage() {
 
       const { data, error } = await supabase
         .from('security_settings')
-        .select('*')
+        .select('id,google_oauth_enabled,allowed_domains,session_timeout_minutes,updated_by,updated_at')
         .order('id', { ascending: true })
         .limit(1);
 
@@ -128,7 +83,7 @@ export default function SecurityPage() {
         setSettingsRowId(row.id);
         setForm({
           google_oauth_enabled: Boolean(row.google_oauth_enabled),
-          allowed_domains: row.allowed_domains || 'muhayu.com,gmail.com',
+          allowed_domains: row.allowed_domains || DEFAULT_ALLOWED_DOMAINS_TEXT,
           session_timeout_minutes: Number(row.session_timeout_minutes || 60),
           updated_by: row.updated_by || 'system',
           updated_at: row.updated_at || '',
@@ -137,15 +92,19 @@ export default function SecurityPage() {
         setSettingsRowId(null);
         setForm({
           google_oauth_enabled: true,
-          allowed_domains: 'muhayu.com,gmail.com',
+          allowed_domains: DEFAULT_ALLOWED_DOMAINS_TEXT,
           session_timeout_minutes: 60,
           updated_by: 'system',
           updated_at: '',
         });
       }
     } catch (err) {
-      console.error(err);
-      setError(err.message || '보안 설정 조회 실패');
+      reportAppError(err, {
+        title: '보안 설정 조회 실패',
+        context: 'SecurityPage.loadSettings',
+        fallbackMessage: '보안 설정 조회 실패',
+        setError,
+      });
     } finally {
       setLoading(false);
     }
@@ -160,8 +119,7 @@ export default function SecurityPage() {
 
   async function insertSecurityAuditLog(action, detail) {
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const actorEmail = authData?.user?.email || 'unknown';
+      const actorEmail = currentUserEmail || 'unknown';
 
       await runSupabaseMutation(async () => {
         const { error } = await supabase.from('security_audit_logs').insert({
@@ -175,7 +133,11 @@ export default function SecurityPage() {
         if (error) throw error;
       });
     } catch (err) {
-      console.error('security_audit_logs insert 실패:', err);
+      reportAppError(err, {
+        title: '보안 감사 로그 저장 실패',
+        context: 'SecurityPage.insertSecurityAuditLog',
+        fallbackMessage: '보안 감사 로그 저장 실패',
+      });
     }
   }
 
@@ -185,8 +147,7 @@ export default function SecurityPage() {
       setError('');
       setMessage('');
 
-      const { data: authData } = await supabase.auth.getUser();
-      const actorEmail = authData?.user?.email || 'system';
+      const actorEmail = currentUserEmail || 'system';
 
       const payload = {
         google_oauth_enabled: Boolean(form.google_oauth_enabled),
@@ -228,19 +189,15 @@ export default function SecurityPage() {
       setMessage('보안 설정이 저장되었습니다.');
       await loadSettings();
     } catch (err) {
-      console.error(err);
-      setError(err.message || '보안 설정 저장 실패');
+      reportAppError(err, {
+        title: '보안 설정 저장 실패',
+        context: 'SecurityPage.handleSave',
+        fallbackMessage: '보안 설정 저장 실패',
+        setError,
+      });
     } finally {
       setSaving(false);
     }
-  }
-
-  if (roleLoading) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-        권한 확인 중...
-      </div>
-    );
   }
 
   if (!isAdmin) {

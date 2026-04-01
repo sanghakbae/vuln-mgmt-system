@@ -12,12 +12,12 @@ import {
   PanelLeftOpen,
   Menu,
   X,
-  MoreHorizontal,
   Settings,
   Users,
   LogOut,
 } from 'lucide-react';
 import { NAV_ITEMS } from '../constants/navigation';
+import { canAccessMenu, getRoleLabel } from '../utils/securityDefaults';
 
 const menuIconMap = {
   dashboard: LayoutDashboard,
@@ -32,7 +32,23 @@ const menuIconMap = {
   audit: History,
 };
 
-const mobilePrimaryMenus = ['dashboard', 'assets', 'checklist', 'inspection'];
+const sidebarSections = [
+  {
+    key: 'overview',
+    label: '개요',
+    items: ['dashboard'],
+  },
+  {
+    key: 'workflow',
+    label: '점검 워크플로',
+    items: ['assets', 'checklist', 'inspection', 'inspectionResult', 'vuln', 'report'],
+  },
+  {
+    key: 'admin',
+    label: '관리자 메뉴',
+    items: ['security', 'access', 'audit'],
+  },
+];
 
 function SidebarItem({ item, active, collapsed, onClick, disabled }) {
   const Icon = menuIconMap[item.key] || FileText;
@@ -48,21 +64,29 @@ function SidebarItem({ item, active, collapsed, onClick, disabled }) {
           ? item.label
           : undefined
       }
-      className={`group flex w-full items-center transition-colors ${
+      className={`group relative flex w-full items-center transition-all ${
         collapsed
-          ? 'justify-center rounded-2xl px-2 py-3'
-          : 'gap-3 rounded-[22px] px-4 py-3'
+          ? 'justify-center rounded-2xl px-2 py-3.5'
+          : 'gap-3 rounded-2xl px-4 py-3.5'
       } ${
         disabled
-          ? 'cursor-not-allowed bg-slate-50 text-slate-300'
+          ? 'cursor-not-allowed border border-transparent bg-slate-50 text-slate-300'
           : active
-          ? 'bg-slate-950 text-white'
-          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          ? 'border border-slate-200 bg-slate-900 text-white shadow-sm'
+          : 'border border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950'
       }`}
     >
+      {!collapsed && (
+        <span
+          className={`absolute left-1 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full ${
+            active ? 'bg-cyan-400' : 'bg-transparent'
+          }`}
+        />
+      )}
+
       <span className="flex h-6 w-6 shrink-0 items-center justify-center">
         <Icon
-          size={20}
+          size={18}
           strokeWidth={2.2}
           className={`shrink-0 ${
             disabled
@@ -76,12 +100,12 @@ function SidebarItem({ item, active, collapsed, onClick, disabled }) {
 
       {!collapsed && (
         <div className="min-w-0 text-left">
-          <div className="truncate text-[14px] font-semibold leading-5">
+          <div className="truncate text-[13px] font-semibold leading-5 tracking-tight">
             {item.label}
           </div>
           <div
             className={`mt-0.5 truncate text-[11px] leading-4 ${
-              disabled ? 'text-slate-300' : active ? 'text-slate-300' : 'text-slate-400'
+              disabled ? 'text-slate-300' : active ? 'text-slate-300' : 'text-slate-500'
             }`}
           >
             {item.desc}
@@ -99,7 +123,8 @@ function MobileBottomItem({ item, active, onClick, labelOverride, disabled }) {
     <button
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
-      className={`flex flex-col items-center justify-center gap-1 px-2 py-2.5 text-[11px] font-medium transition ${
+      title={labelOverride || item.label}
+      className={`flex h-12 min-w-[36px] flex-1 items-center justify-center px-1 py-2 transition ${
         disabled
           ? 'cursor-not-allowed text-slate-300'
           : active
@@ -108,7 +133,6 @@ function MobileBottomItem({ item, active, onClick, labelOverride, disabled }) {
       }`}
     >
       <Icon size={18} strokeWidth={2.1} />
-      <span className="truncate">{labelOverride || item.label}</span>
     </button>
   );
 }
@@ -128,26 +152,25 @@ export default function AppLayout({
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const visibleMenu = useMemo(() => {
-    if (currentUserRole === 'admin') return NAV_ITEMS;
-
-    return NAV_ITEMS.filter(
-      (item) => !['security', 'access', 'audit'].includes(item.key)
+    return NAV_ITEMS.filter((item) =>
+      canAccessMenu(item.key, currentUserEmail, currentUserRole)
     );
-  }, [currentUserRole]);
-
-  const primaryMobileItems = useMemo(
-    () => visibleMenu.filter((item) => mobilePrimaryMenus.includes(item.key)),
-    [visibleMenu]
-  );
-
-  const secondaryMobileItems = useMemo(
-    () => visibleMenu.filter((item) => !mobilePrimaryMenus.includes(item.key)),
-    [visibleMenu]
-  );
+  }, [currentUserEmail, currentUserRole]);
 
   const activeMenuLabel = useMemo(() => {
     return visibleMenu.find((item) => item.key === activeMenu)?.label || title;
   }, [visibleMenu, activeMenu, title]);
+
+  const visibleSections = useMemo(() => {
+    return sidebarSections
+      .map((section) => ({
+        ...section,
+        items: section.items
+          .map((key) => visibleMenu.find((item) => item.key === key))
+          .filter(Boolean),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [visibleMenu]);
 
   function handleMenuChange(key) {
     if (menuEnabledMap[key] === false) return;
@@ -203,7 +226,7 @@ export default function AppLayout({
                       취약점 관리 시스템
                     </div>
                     <div className="mt-1 text-[12px] text-slate-400">
-                      {currentUserRole === 'admin' ? 'Administrator' : 'User'}
+                      {getRoleLabel(currentUserRole, currentUserEmail)}
                     </div>
                   </div>
                 </div>
@@ -228,16 +251,29 @@ export default function AppLayout({
           </div>
 
           <div className={`${collapsed ? 'px-2 py-4' : 'px-3 py-4'} flex-1 overflow-y-auto`}>
-            <div className="space-y-2">
-              {visibleMenu.map((item) => (
-                <SidebarItem
-                  key={item.key}
-                  item={item}
-                  active={item.key === activeMenu}
-                  collapsed={collapsed}
-                  disabled={menuEnabledMap[item.key] === false}
-                  onClick={() => setActiveMenu(item.key)}
-                />
+            <div className="space-y-5">
+              {visibleSections.map((section) => (
+                <div key={section.key}>
+                  {!collapsed ? (
+                    <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                      {section.label}
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    {section.items.map((item) => (
+                      <div key={item.key} className="relative">
+                        <SidebarItem
+                          item={item}
+                          active={item.key === activeMenu}
+                          collapsed={collapsed}
+                          disabled={menuEnabledMap[item.key] === false}
+                          onClick={() => setActiveMenu(item.key)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -245,7 +281,7 @@ export default function AppLayout({
 
         <main className="min-w-0 flex-1">
           <header className="hidden bg-transparent xl:block">
-            <div className="flex flex-col gap-1 px-6 py-3 lg:px-8 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-h-[72px] flex-col justify-center gap-1 px-6 py-3 lg:px-8 xl:flex-row xl:items-center xl:justify-between">
               <div className="min-w-0">
                 <div className="truncate text-lg font-semibold text-slate-900">
                   {title}
@@ -264,7 +300,7 @@ export default function AppLayout({
                 </div>
 
                 <div className="flex h-8 items-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-[11px] font-semibold text-amber-700">
-                  {currentUserRole || 'user'}
+                  {getRoleLabel(currentUserRole, currentUserEmail)}
                 </div>
 
                 <button
@@ -278,15 +314,15 @@ export default function AppLayout({
             </div>
           </header>
 
-          <div className="space-y-6 px-4 py-3 pb-24 lg:px-6 lg:py-4 xl:px-6 xl:py-2 xl:pb-0 2xl:px-8">
+          <div className="space-y-4 px-4 py-4 pb-24 lg:px-6 lg:py-4 xl:px-6 xl:pb-0 2xl:px-8">
             {children}
           </div>
         </main>
       </div>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white xl:hidden">
-        <div className="grid grid-cols-5">
-          {primaryMobileItems.map((item) => (
+        <div className="flex items-center gap-0.5 px-1">
+          {visibleMenu.map((item) => (
             <MobileBottomItem
               key={item.key}
               item={item}
@@ -304,18 +340,6 @@ export default function AppLayout({
               }
             />
           ))}
-
-          <button
-            onClick={() => setMobileDrawerOpen(true)}
-            className={`flex flex-col items-center justify-center gap-1 px-2 py-2.5 text-[11px] font-medium transition ${
-              secondaryMobileItems.some((item) => item.key === activeMenu)
-                ? 'text-slate-950'
-                : 'text-slate-500'
-            }`}
-          >
-            <MoreHorizontal size={18} strokeWidth={2.1} />
-            <span>더보기</span>
-          </button>
         </div>
       </nav>
 
@@ -368,7 +392,7 @@ export default function AppLayout({
                 </div>
 
                 <div className="flex h-8 items-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-[11px] font-semibold text-amber-700">
-                  {currentUserRole || 'user'}
+                  {getRoleLabel(currentUserRole, currentUserEmail)}
                 </div>
 
                 <button
