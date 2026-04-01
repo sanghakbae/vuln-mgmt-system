@@ -255,18 +255,18 @@ export default function AccessControlPage({
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2 text-center text-slate-800 whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-center text-[11px] text-slate-800 whitespace-nowrap">
                       {row.email}
                     </td>
-                    <td className="px-3 py-2 text-center text-slate-700 whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-center text-[11px] text-slate-700 whitespace-nowrap">
                       {row.name || '-'}
                     </td>
-                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-center whitespace-nowrap">
                       <select
                         value={row.role}
                         onChange={(e) => handleRoleChange(row.id, e.target.value)}
                         disabled={currentUserId === row.id}
-                        className={`rounded-lg border px-3 py-1 text-center text-sm font-semibold outline-none disabled:bg-slate-100 disabled:text-slate-400 ${getRoleSelectClass(row.role)}`}
+                        className={`rounded-lg border px-2.5 py-0.5 text-center text-[11px] font-semibold outline-none disabled:bg-slate-100 disabled:text-slate-400 ${getRoleSelectClass(row.role)}`}
                       >
                         {ROLE_OPTIONS.map((role) => (
                           <option key={role} value={role}>
@@ -275,29 +275,29 @@ export default function AccessControlPage({
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 py-2 text-center text-slate-700 whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-center text-[11px] text-slate-700 whitespace-nowrap">
                       {row.created_at
                         ? String(row.created_at).slice(0, 19).replace('T', ' ')
                         : '-'}
                     </td>
-                    <td className="px-3 py-2 text-center text-slate-700 whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-center text-[11px] text-slate-700 whitespace-nowrap">
                       {row.last_login
                         ? String(row.last_login).slice(0, 19).replace('T', ' ')
                         : '-'}
                     </td>
-                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => handleSaveRole(row)}
                           disabled={savingId === row.id || deletingId === row.id || currentUserId === row.id}
-                          className="rounded-lg bg-slate-950 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                          className="rounded-lg bg-slate-950 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
                         >
                           {savingId === row.id ? '저장 중...' : '저장'}
                         </button>
                         <button
                           onClick={() => handleDeleteUser(row)}
                           disabled={savingId === row.id || deletingId === row.id || currentUserId === row.id}
-                          className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 disabled:opacity-50"
+                          className="rounded-lg border border-rose-200 px-2.5 py-1 text-[11px] font-semibold text-rose-600 disabled:opacity-50"
                         >
                           {deletingId === row.id ? '삭제 중...' : '삭제'}
                         </button>
