@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const repoName = process.env.GITHUB_REPOSITORY?.split("/")[1];
-
 export default defineConfig({
   plugins: [react()],
-  base: process.env.GITHUB_ACTIONS ? `/${repoName}/` : "/",
+  // Relative asset paths work on both the GitHub Pages project URL
+  // and the custom domain root without rebuilding per host.
+  base: "./",
 });
